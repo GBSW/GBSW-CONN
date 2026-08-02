@@ -1,0 +1,1585 @@
+package kr.hs.gbsw.communication.common;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import jakarta.servlet.http.Cookie;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.ByteBuffer;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import kr.hs.gbsw.communication.auth.domain.AuthPrincipal;
+import kr.hs.gbsw.communication.moderation.domain.ModerationCaseStatus;
+import kr.hs.gbsw.communication.moderation.domain.ModerationCaseType;
+import kr.hs.gbsw.communication.moderation.domain.ModerationVoteDecision;
+import kr.hs.gbsw.communication.moderation.service.ContentReportService;
+import kr.hs.gbsw.communication.moderation.service.ModerationCaseService;
+import kr.hs.gbsw.communication.moderation.service.ModerationVoteService;
+import kr.hs.gbsw.communication.proposal.domain.AuthorVisibility;
+import kr.hs.gbsw.communication.proposal.domain.SupportResult;
+import kr.hs.gbsw.communication.proposal.service.ProposalAssignmentService;
+import kr.hs.gbsw.communication.proposal.service.ProposalService;
+import kr.hs.gbsw.communication.user.exception.BootstrapAlreadyCompletedException;
+import kr.hs.gbsw.communication.user.service.SuperAdminBootstrapService;
+import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.http.MediaType;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.mysql.MySQLContainer;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+
+@Testcontainers
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@AutoConfigureMockMvc
+class ApplicationIntegrationTest {
+
+    @Container
+    private static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4.10")
+            .withDatabaseName("school_communication")
+            .withUsername("application_test")
+            .withPassword("application_test_password");
+
+    @DynamicPropertySource
+    static void databaseProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.username", MYSQL::getUsername);
+        registry.add("spring.datasource.password", MYSQL::getPassword);
+        registry.add("app.security.secrets.throttle-fingerprint",
+                () -> "integration-test-throttle-fingerprint-secret");
+        registry.add("app.identity-vault.key-base64",
+                () -> "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=");
+        registry.add("app.identity-vault.key-version", () -> "1");
+        registry.add("app.security.rate-limit.login-failures-before-delay", () -> "3");
+    }
+
+    @LocalServerPort
+    private int port;
+
+    @Autowired
+    private Flyway flyway;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @Autowired
+    private SuperAdminBootstrapService superAdminBootstrapService;
+
+    @Autowired
+    private ProposalService proposalService;
+
+    @Autowired
+    private ProposalAssignmentService proposalAssignmentService;
+
+    @Autowired
+    private ContentReportService contentReportService;
+
+    @Autowired
+    private ModerationCaseService moderationCaseService;
+
+    @Autowired
+    private ModerationVoteService moderationVoteService;
+
+    private final HttpClient httpClient = HttpClient.newHttpClient();
+
+    @BeforeEach
+    void cleanApplicationData() {
+        jdbcTemplate.update("DELETE FROM audit_logs");
+        jdbcTemplate.update("DELETE FROM identity_reveal_records");
+        jdbcTemplate.update("DELETE FROM proposal_visibility_history");
+        jdbcTemplate.update("DELETE FROM moderation_votes");
+        jdbcTemplate.update("DELETE FROM moderation_reviewer_snapshots");
+        jdbcTemplate.update("DELETE FROM moderation_cases");
+        jdbcTemplate.update("DELETE FROM content_reports");
+        jdbcTemplate.update("DELETE FROM proposal_notifications");
+        jdbcTemplate.update("DELETE FROM proposal_official_responses");
+        jdbcTemplate.update("DELETE FROM proposal_teacher_assignments");
+        jdbcTemplate.update("DELETE FROM proposal_status_history");
+        jdbcTemplate.update("DELETE FROM proposal_supports");
+        jdbcTemplate.update("DELETE FROM proposal_identities");
+        jdbcTemplate.update("DELETE FROM proposals");
+        jdbcTemplate.update("DELETE FROM bootstrap_markers");
+        jdbcTemplate.update("DELETE FROM password_reset_tokens");
+        jdbcTemplate.update("DELETE FROM activation_codes");
+        jdbcTemplate.update("DELETE FROM office_assignments");
+        jdbcTemplate.update("DELETE FROM role_assignments");
+        jdbcTemplate.update("DELETE FROM credentials");
+        jdbcTemplate.update("DELETE FROM SPRING_SESSION");
+        jdbcTemplate.update("DELETE FROM security_throttle_states");
+        jdbcTemplate.update("DELETE FROM users");
+    }
+
+    @Test
+    void appliesFlywayAndCreatesJdbcSessionTablesOnEmptyMySql() {
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("6");
+
+        Integer sessionTableCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'SPRING_SESSION'",
+                Integer.class);
+
+        assertThat(sessionTableCount).isEqualTo(1);
+    }
+
+    @Test
+    void publicStatusReturnsTraceIdCsrfCookieAndSecurityHeaders() throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(uri("/api/v1/system/status"))
+                .header("X-Request-Id", "integration_trace_123")
+                .GET()
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(response.headers().firstValue("X-Request-Id")).contains("integration_trace_123");
+        assertThat(response.headers().allValues("Set-Cookie"))
+                .anyMatch(cookie -> cookie.startsWith("XSRF-TOKEN=") && cookie.contains("SameSite=Lax"));
+        String contentSecurityPolicy = response.headers()
+                .firstValue("Content-Security-Policy")
+                .orElseThrow();
+        assertThat(contentSecurityPolicy)
+                .contains("default-src 'self'", "object-src 'none'", "frame-ancestors 'none'");
+        assertThat(response.body()).contains("\"status\":\"ok\"", "\"apiVersion\":\"v1\"");
+    }
+
+    @Test
+    void protectedPathReturnsSafeCommonAuthenticationError() throws Exception {
+        HttpResponse<String> response = httpClient.send(
+                HttpRequest.newBuilder(uri("/api/v1/not-implemented")).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(401);
+        assertThat(response.body())
+                .contains("\"code\":\"AUTHENTICATION_REQUIRED\"")
+                .contains("\"traceId\":")
+                .doesNotContain("Exception", "java.", "SELECT", "/Users/");
+    }
+
+    @Test
+    void openApiPublishesAuthenticationContractAndCommonErrors() throws Exception {
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.paths['/api/v1/auth/login'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/auth/activate'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/auth/reauthenticate'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/admin/users'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/admin/users'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/admin/offices/{office}/appointments'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/proposals'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/proposals'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/proposals/{publicId}/support'].put").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/proposals/{publicId}/support'].delete").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/admin/proposals/{publicId}/assignments'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/proposals/{publicId}/review-start'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/proposals/{publicId}/decisions/accept'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/proposals/{publicId}/execution-complete'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/proposals/{publicId}/reports'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/moderation/reports'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/moderation/reports/{reportPublicId}/cases'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/moderation/cases/{publicId}/votes/approve'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/identity-reveal-cases/{publicId}/reveal'].post").exists())
+                .andExpect(jsonPath("$.components.schemas.ErrorResponse").exists())
+                .andExpect(jsonPath("$.components.securitySchemes.sessionCookie").exists())
+                .andExpect(jsonPath("$.components.securitySchemes.csrfHeader").exists());
+    }
+
+    @Test
+    void activationIsOneTimeAndLoginCreatesServerSession() throws Exception {
+        String loginId = "student.2026";
+        String activationCode = "7Kp9zT4Wh3NmQ6Rx";
+        String password = "correct horse battery staple";
+        createPendingAccount(loginId, "홍길동", "STUDENT", activationCode, Instant.now().plusSeconds(3600));
+
+        mockMvc.perform(post("/api/v1/auth/activate")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"loginId":"student.2026","activationCode":"7Kp9zT4Wh3NmQ6Rx","password":"correct horse battery staple"}
+                                """))
+                .andExpect(status().isNoContent());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT account_status FROM users WHERE login_id = ?", String.class, loginId))
+                .isEqualTo("ACTIVE");
+        String storedPassword = jdbcTemplate.queryForObject("""
+                        SELECT c.password_hash FROM credentials c
+                        JOIN users u ON u.id = c.user_id
+                        WHERE u.login_id = ?
+                        """, String.class, loginId);
+        assertThat(storedPassword).startsWith("$argon2id$").doesNotContain(password);
+
+        mockMvc.perform(post("/api/v1/auth/activate")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"loginId":"student.2026","activationCode":"7Kp9zT4Wh3NmQ6Rx","password":"another secure passphrase"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("ACTIVATION_FAILED"));
+
+        MvcResult login = login(loginId, password);
+        Cookie sessionCookie = requireSessionCookie(login);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM SPRING_SESSION WHERE PRINCIPAL_NAME = ?", Integer.class, loginId))
+                .isEqualTo(1);
+
+        mockMvc.perform(get("/api/v1/auth/me").cookie(sessionCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.loginId").value(loginId))
+                .andExpect(jsonPath("$.roles[0]").value("STUDENT"))
+                .andExpect(jsonPath("$.offices").isArray());
+
+        mockMvc.perform(post("/api/v1/auth/logout").cookie(sessionCookie).with(csrf()))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(get("/api/v1/auth/me").cookie(sessionCookie))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void expiredActivationCodeAndMissingCsrfAreRejected() throws Exception {
+        createPendingAccount(
+                "expired.student",
+                "만료 학생",
+                "STUDENT",
+                "7Kp9zT4Wh3NmQ6Rx",
+                Instant.now().minusSeconds(1));
+
+        mockMvc.perform(post("/api/v1/auth/activate")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"loginId":"expired.student","activationCode":"7Kp9zT4Wh3NmQ6Rx","password":"correct horse battery staple"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("ACTIVATION_FAILED"));
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginId\":\"expired.student\",\"password\":\"correct horse battery staple\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+    }
+
+    @Test
+    void loginFailuresPersistAndReturnGeneralizedErrors() throws Exception {
+        createActiveAccount("known.student", "알려진 학생", "STUDENT", "known secure passphrase");
+
+        for (int attempt = 0; attempt < 3; attempt++) {
+            mockMvc.perform(post("/api/v1/auth/login")
+                            .with(csrf())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"loginId\":\"known.student\",\"password\":\"wrong password value\"}"))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("AUTHENTICATION_FAILED"))
+                    .andExpect(jsonPath("$.message").value("로그인 정보 또는 계정 상태를 확인해 주세요."));
+        }
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .with(request -> {
+                            request.setRemoteAddr("203.0.113.10");
+                            return request;
+                        })
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginId\":\"known.student\",\"password\":\"known secure passphrase\"}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code").value("AUTHENTICATION_THROTTLED"));
+
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM security_throttle_states
+                        WHERE failure_count = 3 AND blocked_until IS NOT NULL
+                        """, Integer.class))
+                .isEqualTo(2);
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .with(request -> {
+                            request.setRemoteAddr("203.0.113.11");
+                            return request;
+                        })
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginId\":\"unknown.student\",\"password\":\"wrong password value\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTHENTICATION_FAILED"))
+                .andExpect(jsonPath("$.message").value("로그인 정보 또는 계정 상태를 확인해 주세요."));
+    }
+
+    @Test
+    void passwordResetConsumesCodeAndInvalidatesExistingSessions() throws Exception {
+        SeedAccount account = createActiveAccount(
+                "reset.student", "재설정 학생", "STUDENT", "old secure passphrase");
+        Cookie sessionCookie = requireSessionCookie(login("reset.student", "old secure passphrase"));
+        String resetCode = "G8vY4mN7qR2xP9Ts";
+        insertPasswordResetCode(account, resetCode, Instant.now().plusSeconds(1800));
+
+        mockMvc.perform(post("/api/v1/auth/password-reset/complete")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"loginId":"reset.student","resetCode":"G8vY4mN7qR2xP9Ts","newPassword":"new secure passphrase value"}
+                                """))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(get("/api/v1/auth/me").cookie(sessionCookie))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginId\":\"reset.student\",\"password\":\"old secure passphrase\"}"))
+                .andExpect(status().isUnauthorized());
+        login("reset.student", "new secure passphrase value");
+
+        mockMvc.perform(post("/api/v1/auth/password-reset/complete")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"loginId":"reset.student","resetCode":"G8vY4mN7qR2xP9Ts","newPassword":"another secure passphrase"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PASSWORD_RESET_FAILED"));
+    }
+
+    @Test
+    void onlySuperAdminCanProvisionAccountAndRawCodeIsNeverStored() throws Exception {
+        createActiveAccount("ordinary.student", "일반 학생", "STUDENT", "student secure passphrase");
+        Cookie studentSession = requireSessionCookie(login("ordinary.student", "student secure passphrase"));
+
+        mockMvc.perform(post("/api/v1/admin/users")
+                        .cookie(studentSession)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"loginId":"new.student","displayName":"새 학생","role":"STUDENT","reason":"2026학년도 등록"}
+                                """))
+                .andExpect(status().isForbidden());
+
+        createActiveAccount("system.admin", "시스템 관리자", "SUPER_ADMIN", "admin secure passphrase");
+        Cookie adminSession = requireSessionCookie(login("system.admin", "admin secure passphrase"));
+        MvcResult created = mockMvc.perform(post("/api/v1/admin/users")
+                        .cookie(adminSession)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"loginId":"new.student","displayName":"새 학생","role":"STUDENT","reason":"2026학년도 등록"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.code").isString())
+                .andReturn();
+
+        JsonNode body = objectMapper.readTree(created.getResponse().getContentAsString());
+        String rawCode = body.get("code").asText();
+        String storedCode = jdbcTemplate.queryForObject("""
+                        SELECT ac.code_hash
+                        FROM activation_codes ac
+                        JOIN users u ON u.id = ac.user_id
+                        WHERE u.login_id = 'new.student'
+                        """, String.class);
+        assertThat(rawCode).hasSize(16);
+        assertThat(storedCode).startsWith("$argon2id$").doesNotContain(rawCode);
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM audit_logs
+                        WHERE event_type = 'ADMIN_ACCOUNT_CREATED' AND outcome = 'SUCCESS'
+                        """, Integer.class))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void superAdminCanSearchAccountsWithStatusPaginationAndCurrentAssignments() throws Exception {
+        SeedAccount admin = createActiveAccount(
+                "search.admin", "검색 관리자", "SUPER_ADMIN", "admin secure passphrase");
+        SeedAccount student = createActiveAccount(
+                "search.student", "검색 대상 학생", "STUDENT", "student secure passphrase");
+        createActiveAccount("other.teacher", "다른 교사", "TEACHER", "teacher secure passphrase");
+        Cookie adminSession = requireSessionCookie(login("search.admin", "admin secure passphrase"));
+
+        Instant now = Instant.now();
+        jdbcTemplate.update("""
+                        INSERT INTO office_assignments (
+                            id, user_id, office_type, starts_at, ends_at,
+                            assigned_by_user_id, assigned_at, reason
+                        ) VALUES (UUID_TO_BIN(?), UUID_TO_BIN(?), 'STUDENT_COUNCIL_PRESIDENT', ?, NULL, UUID_TO_BIN(?), ?, ?)
+                        """,
+                UUID.randomUUID().toString(), student.id().toString(),
+                Timestamp.from(now.minusSeconds(60)), admin.id().toString(),
+                Timestamp.from(now), "통합 테스트 현임");
+        jdbcTemplate.update("""
+                        INSERT INTO role_assignments (
+                            id, user_id, role_type, starts_at, ends_at,
+                            assigned_by_user_id, assigned_at, reason
+                        ) VALUES (UUID_TO_BIN(?), UUID_TO_BIN(?), 'TEACHER', ?, ?, NULL, ?, ?)
+                        """,
+                UUID.randomUUID().toString(), student.id().toString(),
+                Timestamp.from(now.minusSeconds(120)), Timestamp.from(now.minusSeconds(90)),
+                Timestamp.from(now.minusSeconds(120)), "종료된 역할");
+        Cookie studentSession = requireSessionCookie(login("search.student", "student secure passphrase"));
+
+        mockMvc.perform(get("/api/v1/admin/users")
+                        .cookie(studentSession))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/v1/admin/users")
+                        .cookie(adminSession)
+                        .param("query", "대상")
+                        .param("status", "ACTIVE")
+                        .param("page", "0")
+                        .param("size", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].publicId").value(student.publicId().toString()))
+                .andExpect(jsonPath("$.items[0].loginId").value("search.student"))
+                .andExpect(jsonPath("$.items[0].currentRoles.length()").value(1))
+                .andExpect(jsonPath("$.items[0].currentRoles[0]").value("STUDENT"))
+                .andExpect(jsonPath("$.items[0].currentOffices[0]").value("STUDENT_COUNCIL_PRESIDENT"))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(1))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.totalPages").value(1));
+
+        mockMvc.perform(get("/api/v1/admin/users")
+                        .cookie(adminSession)
+                        .param("query", "search%"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0));
+    }
+
+    @Test
+    void anonymousAndNamedProposalsProtectIdentityAndHideGatheringContentFromTeachers() throws Exception {
+        SeedAccount anonymousStudent = createActiveAccount(
+                "anonymous.student", "익명 학생", "STUDENT", "student secure passphrase");
+        createActiveAccount("proposal.teacher", "제안 교사", "TEACHER", "teacher secure passphrase");
+        Cookie studentSession = requireSessionCookie(login("anonymous.student", "student secure passphrase"));
+        Cookie teacherSession = requireSessionCookie(login("proposal.teacher", "teacher secure passphrase"));
+
+        MvcResult anonymousCreated = mockMvc.perform(post("/api/v1/proposals")
+                        .cookie(studentSession)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title":"기숙사 생활 개선",
+                                  "content":"소등 시간을 논의해 주세요. <script>alert(1)</script>",
+                                  "authorVisibility":"ANONYMOUS"
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.authorVisibility").value("ANONYMOUS"))
+                .andExpect(jsonPath("$.authorDisplayName").doesNotExist())
+                .andExpect(jsonPath("$.supportCount").value(1))
+                .andExpect(jsonPath("$.viewerSupported").value(true))
+                .andExpect(jsonPath("$.workflowStatus").value("GATHERING_SUPPORT"))
+                .andReturn();
+        JsonNode anonymousBody = objectMapper.readTree(anonymousCreated.getResponse().getContentAsString());
+        UUID proposalPublicId = UUID.fromString(anonymousBody.get("publicId").asText());
+
+        mockMvc.perform(get("/api/v1/proposals/{publicId}", proposalPublicId).cookie(studentSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").value("소등 시간을 논의해 주세요. <script>alert(1)</script>"))
+                .andExpect(jsonPath("$.authorDisplayName").doesNotExist());
+        mockMvc.perform(get("/api/v1/proposals/{publicId}", proposalPublicId).cookie(teacherSession))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("PROPOSAL_NOT_FOUND"));
+        mockMvc.perform(get("/api/v1/proposals").cookie(teacherSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0));
+
+        byte[] encryptedIdentity = jdbcTemplate.queryForObject("""
+                        SELECT identity.encrypted_user_id
+                        FROM proposal_identities identity
+                        JOIN proposals proposal ON proposal.id = identity.proposal_id
+                        WHERE proposal.public_id = UUID_TO_BIN(?)
+                        """, byte[].class, proposalPublicId.toString());
+        assertThat(encryptedIdentity).isNotNull().hasSize(32);
+        assertThat(encryptedIdentity).isNotEqualTo(uuidBytes(anonymousStudent.id()));
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM information_schema.columns
+                        WHERE table_schema = DATABASE()
+                          AND table_name = 'proposals'
+                          AND column_name LIKE '%user_id%'
+                        """, Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM audit_logs
+                        WHERE event_type = 'PROPOSAL_CREATED' AND actor_user_id IS NULL
+                        """, Integer.class)).isEqualTo(1);
+
+        mockMvc.perform(post("/api/v1/proposals")
+                        .cookie(studentSession)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title":"실명 공개 제안",
+                                  "content":"이름을 공개하고 작성합니다.",
+                                  "authorVisibility":"NAMED"
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.authorDisplayName").value("익명 학생"));
+        mockMvc.perform(post("/api/v1/proposals")
+                        .cookie(teacherSession)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"title":"교사 작성 시도","content":"허용되지 않음","authorVisibility":"NAMED"}
+                                """))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void supportAndWithdrawalAreStudentOnlyAndIdempotentBeforeFormalization() throws Exception {
+        createActiveAccount("support.creator", "제안 작성자", "STUDENT", "creator secure passphrase");
+        createActiveAccount("support.student", "동의 학생", "STUDENT", "supporter secure passphrase");
+        createActiveAccount("support.teacher", "동의 교사", "TEACHER", "teacher secure passphrase");
+        Cookie creatorSession = requireSessionCookie(login("support.creator", "creator secure passphrase"));
+        Cookie supporterSession = requireSessionCookie(login("support.student", "supporter secure passphrase"));
+        Cookie teacherSession = requireSessionCookie(login("support.teacher", "teacher secure passphrase"));
+
+        MvcResult created = mockMvc.perform(post("/api/v1/proposals")
+                        .cookie(creatorSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"title":"동의 멱등성","content":"중복 동의를 검증합니다.","authorVisibility":"ANONYMOUS"}
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID publicId = UUID.fromString(
+                objectMapper.readTree(created.getResponse().getContentAsString()).get("publicId").asText());
+
+        for (int request = 0; request < 2; request++) {
+            mockMvc.perform(put("/api/v1/proposals/{publicId}/support", publicId)
+                            .cookie(supporterSession).with(csrf()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.supported").value(true))
+                    .andExpect(jsonPath("$.supportCount").value(2));
+        }
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM proposal_supports", Integer.class)).isEqualTo(2);
+
+        SeedAccount concurrentStudent = insertUser(
+                "support.concurrent", "동시 동의 학생", "ACTIVE", "STUDENT");
+        ExecutorService duplicateExecutor = Executors.newFixedThreadPool(2);
+        CountDownLatch duplicateReady = new CountDownLatch(2);
+        CountDownLatch duplicateStart = new CountDownLatch(1);
+        try {
+            java.util.concurrent.Callable<SupportResult> duplicateRequest = () -> {
+                duplicateReady.countDown();
+                duplicateStart.await();
+                return proposalService.support(
+                        studentPrincipal(concurrentStudent), publicId, "duplicate-support-trace");
+            };
+            Future<SupportResult> first = duplicateExecutor.submit(duplicateRequest);
+            Future<SupportResult> second = duplicateExecutor.submit(duplicateRequest);
+            duplicateReady.await();
+            duplicateStart.countDown();
+            assertThat(List.of(first.get(), second.get()))
+                    .allSatisfy(result -> assertThat(result.supportCount()).isEqualTo(3));
+        } finally {
+            duplicateExecutor.shutdownNow();
+        }
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM proposal_supports", Integer.class)).isEqualTo(3);
+
+        for (int request = 0; request < 2; request++) {
+            mockMvc.perform(delete("/api/v1/proposals/{publicId}/support", publicId)
+                            .cookie(supporterSession).with(csrf()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.supported").value(false))
+                    .andExpect(jsonPath("$.supportCount").value(2));
+        }
+        mockMvc.perform(put("/api/v1/proposals/{publicId}/support", publicId)
+                        .cookie(teacherSession).with(csrf()))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void concurrentThresholdSupportsFormalizeExactlyOnceAndOpenTeacherAccess() throws Exception {
+        SeedAccount creator = insertUser("threshold.creator", "임계값 작성자", "ACTIVE", "STUDENT");
+        AuthPrincipal creatorPrincipal = studentPrincipal(creator);
+        UUID publicId = proposalService.create(
+                creatorPrincipal,
+                "50명 동시성 검증",
+                "50번째 근처의 동의를 동시에 처리합니다.",
+                AuthorVisibility.ANONYMOUS,
+                "threshold-create-trace").publicId();
+
+        for (int index = 0; index < 47; index++) {
+            SeedAccount supporter = insertUser(
+                    "threshold.student." + index, "임계값 학생 " + index, "ACTIVE", "STUDENT");
+            proposalService.support(studentPrincipal(supporter), publicId, "threshold-sequential-trace");
+        }
+        SeedAccount fortyNinth = insertUser(
+                "threshold.student.48", "임계값 학생 48", "ACTIVE", "STUDENT");
+        SeedAccount fiftieth = insertUser(
+                "threshold.student.49", "임계값 학생 49", "ACTIVE", "STUDENT");
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            Future<SupportResult> first = executor.submit(() -> {
+                ready.countDown();
+                start.await();
+                return proposalService.support(studentPrincipal(fortyNinth), publicId, "threshold-concurrent-a");
+            });
+            Future<SupportResult> second = executor.submit(() -> {
+                ready.countDown();
+                start.await();
+                return proposalService.support(studentPrincipal(fiftieth), publicId, "threshold-concurrent-b");
+            });
+            ready.await();
+            start.countDown();
+            List<SupportResult> results = List.of(first.get(), second.get());
+            assertThat(results).filteredOn(SupportResult::justFormalized).hasSize(1);
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT workflow_status FROM proposals WHERE public_id = UUID_TO_BIN(?)
+                        """, String.class, publicId.toString())).isEqualTo("FORMAL_AGENDA");
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT formalized_support_count FROM proposals WHERE public_id = UUID_TO_BIN(?)
+                        """, Integer.class, publicId.toString())).isEqualTo(50);
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM proposal_status_history history
+                        JOIN proposals proposal ON proposal.id = history.proposal_id
+                        WHERE proposal.public_id = UUID_TO_BIN(?) AND history.to_status = 'FORMAL_AGENDA'
+                        """, Integer.class, publicId.toString())).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM proposal_notifications notification
+                        JOIN proposals proposal ON proposal.id = notification.proposal_id
+                        WHERE proposal.public_id = UUID_TO_BIN(?)
+                        """, Integer.class, publicId.toString())).isEqualTo(1);
+
+        createActiveAccount("formal.teacher", "정식 안건 교사", "TEACHER", "teacher secure passphrase");
+        Cookie teacherSession = requireSessionCookie(login("formal.teacher", "teacher secure passphrase"));
+        mockMvc.perform(get("/api/v1/proposals/{publicId}", publicId).cookie(teacherSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.workflowStatus").value("FORMAL_AGENDA"))
+                .andExpect(jsonPath("$.formalizedSupportCount").value(50));
+
+        assertThatThrownBy(() -> proposalService.withdrawSupport(creatorPrincipal, publicId))
+                .isInstanceOf(kr.hs.gbsw.communication.proposal.exception.SupportWithdrawalClosedException.class);
+    }
+
+    @Test
+    void superAdminInternallyAssignsOnlyActiveTeachersWithoutLeakingThemToStudents() throws Exception {
+        SeedAccount admin = createActiveAccount(
+                "proposal.admin", "제안 관리자", "SUPER_ADMIN", "admin secure passphrase");
+        SeedAccount firstTeacher = createActiveAccount(
+                "proposal.teacher.first", "첫 담당 교사", "TEACHER", "teacher secure passphrase");
+        SeedAccount secondTeacher = createActiveAccount(
+                "proposal.teacher.second", "두 번째 담당 교사", "TEACHER", "teacher secure passphrase");
+        SeedAccount student = createActiveAccount(
+                "proposal.assignment.student", "제안 학생", "STUDENT", "student secure passphrase");
+        UUID publicId = createFormalProposal(student, "내부 담당 지정 검증");
+
+        Cookie adminSession = requireSessionCookie(login("proposal.admin", "admin secure passphrase"));
+        Cookie firstTeacherSession = requireSessionCookie(login(
+                "proposal.teacher.first", "teacher secure passphrase"));
+        Cookie secondTeacherSession = requireSessionCookie(login(
+                "proposal.teacher.second", "teacher secure passphrase"));
+        Cookie studentSession = requireSessionCookie(login(
+                "proposal.assignment.student", "student secure passphrase"));
+
+        mockMvc.perform(post("/api/v1/admin/proposals/{publicId}/assignments", publicId)
+                        .cookie(firstTeacherSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "teacherPublicId", firstTeacher.publicId(),
+                                "reason", "권한 없는 지정 시도"))))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/admin/proposals/{publicId}/assignments", publicId)
+                        .cookie(adminSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "teacherPublicId", firstTeacher.publicId(),
+                                "reason", "정식 안건 검토 지정"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.teacherPublicId").value(firstTeacher.publicId().toString()))
+                .andExpect(jsonPath("$.teacherDisplayName").value("첫 담당 교사"));
+
+        mockMvc.perform(post("/api/v1/admin/proposals/{publicId}/assignments", publicId)
+                        .cookie(adminSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "teacherPublicId", student.publicId(),
+                                "reason", "학생 지정 시도"))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("PROPOSAL_TEACHER_NOT_ELIGIBLE"));
+        MvcResult studentDetail = mockMvc.perform(get("/api/v1/proposals/{publicId}", publicId)
+                        .cookie(studentSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.viewerCanManage").value(false))
+                .andExpect(jsonPath("$.teacherPublicId").doesNotExist())
+                .andReturn();
+        assertThat(studentDetail.getResponse().getContentAsString())
+                .doesNotContain(firstTeacher.publicId().toString(), "첫 담당 교사", "proposal.teacher.first");
+        mockMvc.perform(get("/api/v1/proposals/{publicId}", publicId).cookie(firstTeacherSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.viewerCanManage").value(true));
+        mockMvc.perform(get("/api/v1/proposals/{publicId}", publicId).cookie(secondTeacherSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.viewerCanManage").value(false));
+
+        mockMvc.perform(post("/api/v1/admin/proposals/{publicId}/assignments", publicId)
+                        .cookie(adminSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "teacherPublicId", secondTeacher.publicId(),
+                                "reason", "업무 조정으로 담당 변경"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.teacherPublicId").value(secondTeacher.publicId().toString()));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM proposal_teacher_assignments", Integer.class)).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM proposal_teacher_assignments WHERE unassigned_at IS NULL", Integer.class))
+                .isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM proposal_teacher_assignments
+                        WHERE unassigned_at IS NOT NULL
+                          AND unassigned_by_user_id IS NOT NULL
+                          AND unassignment_reason = '업무 조정으로 담당 변경'
+                        """, Integer.class)).isEqualTo(1);
+        mockMvc.perform(get("/api/v1/admin/proposals").cookie(adminSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].publicId").value(publicId.toString()))
+                .andExpect(jsonPath("$[0].assignment.teacherDisplayName").value("두 번째 담당 교사"));
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM audit_logs
+                        WHERE event_type = 'PROPOSAL_TEACHER_ASSIGNED'
+                          AND actor_user_id = UUID_TO_BIN(?)
+                        """, Integer.class, admin.id().toString())).isEqualTo(2);
+    }
+
+    @Test
+    void assignedTeacherFollowsExplicitDecisionAndExecutionWorkflowWithPublicResponses() throws Exception {
+        SeedAccount teacher = createActiveAccount(
+                "workflow.teacher", "응답 교사 비공개", "TEACHER", "teacher secure passphrase");
+        createActiveAccount(
+                "workflow.other.teacher", "다른 교사", "TEACHER", "other teacher passphrase");
+        SeedAccount student = createActiveAccount(
+                "workflow.student", "진행 확인 학생", "STUDENT", "student secure passphrase");
+        UUID acceptedPublicId = createFormalProposal(student, "채택부터 완료까지 검증");
+        assignTeacherForTest(acceptedPublicId, teacher);
+
+        Cookie teacherSession = requireSessionCookie(login(
+                "workflow.teacher", "teacher secure passphrase"));
+        Cookie otherTeacherSession = requireSessionCookie(login(
+                "workflow.other.teacher", "other teacher passphrase"));
+        Cookie studentSession = requireSessionCookie(login(
+                "workflow.student", "student secure passphrase"));
+
+        mockMvc.perform(post("/api/v1/proposals/{publicId}/review-start", acceptedPublicId)
+                        .cookie(otherTeacherSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"담당자가 아닌 교사의 시도\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("PROPOSAL_ASSIGNMENT_REQUIRED"));
+        mockMvc.perform(post("/api/v1/proposals/{publicId}/review-start", acceptedPublicId)
+                        .cookie(teacherSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"정식 검토를 시작합니다.\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.workflowStatus").value("UNDER_REVIEW"));
+        mockMvc.perform(post("/api/v1/proposals/{publicId}/decisions/accept", acceptedPublicId)
+                        .cookie(teacherSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "content":"학교는 제안의 필요성에 동의하여 채택합니다.",
+                                  "decisionReason":"학생 이용 수요와 안전 기준을 확인했습니다.",
+                                  "followUpPlan":"다음 달까지 세부 실행 계획을 공개합니다."
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.workflowStatus").value("ACCEPTED"));
+        mockMvc.perform(post("/api/v1/proposals/{publicId}/execution-start", acceptedPublicId)
+                        .cookie(teacherSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "content":"실행 준비를 마치고 작업을 시작했습니다.",
+                                  "decisionReason":"필요한 자원과 일정을 확보했습니다.",
+                                  "followUpPlan":"주간 단위로 진행 상황을 확인합니다."
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.workflowStatus").value("IN_PROGRESS"));
+        mockMvc.perform(post("/api/v1/proposals/{publicId}/execution-complete", acceptedPublicId)
+                        .cookie(teacherSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "content":"제안된 개선 작업을 완료했습니다.",
+                                  "decisionReason":"현장 확인과 최종 점검을 마쳤습니다."
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.workflowStatus").value("COMPLETED"));
+        mockMvc.perform(post("/api/v1/proposals/{publicId}/execution-complete", acceptedPublicId)
+                        .cookie(teacherSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"content":"중복 완료","decisionReason":"중복 요청"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("PROPOSAL_STATE_CONFLICT"));
+
+        MvcResult detail = mockMvc.perform(get("/api/v1/proposals/{publicId}", acceptedPublicId)
+                        .cookie(studentSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.workflowStatus").value("COMPLETED"))
+                .andExpect(jsonPath("$.officialResponses.length()").value(3))
+                .andExpect(jsonPath("$.officialResponses[0].resultingStatus").value("ACCEPTED"))
+                .andExpect(jsonPath("$.officialResponses[1].resultingStatus").value("IN_PROGRESS"))
+                .andExpect(jsonPath("$.officialResponses[2].resultingStatus").value("COMPLETED"))
+                .andExpect(jsonPath("$.viewerCanManage").value(false))
+                .andReturn();
+        assertThat(detail.getResponse().getContentAsString())
+                .doesNotContain(teacher.publicId().toString(), "응답 교사 비공개", "workflow.teacher");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM proposal_official_responses", Integer.class)).isEqualTo(3);
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM proposal_status_history history
+                        JOIN proposals proposal ON proposal.id = history.proposal_id
+                        WHERE proposal.public_id = UUID_TO_BIN(?)
+                          AND history.changed_by_user_id = UUID_TO_BIN(?)
+                        """, Integer.class, acceptedPublicId.toString(), teacher.id().toString())).isEqualTo(4);
+
+        UUID rejectedPublicId = createFormalProposal(student, "보류 후 반려 검증");
+        assignTeacherForTest(rejectedPublicId, teacher);
+        mockMvc.perform(post("/api/v1/proposals/{publicId}/review-start", rejectedPublicId)
+                        .cookie(teacherSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"검토 시작\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/proposals/{publicId}/decisions/hold", rejectedPublicId)
+                        .cookie(teacherSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"content":"추가 확인이 필요해 보류합니다.","decisionReason":"관련 부서 확인이 남았습니다."}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.workflowStatus").value("ON_HOLD"));
+        mockMvc.perform(post("/api/v1/proposals/{publicId}/review-resume", rejectedPublicId)
+                        .cookie(teacherSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"추가 확인이 끝나 검토를 재개합니다.\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.workflowStatus").value("UNDER_REVIEW"));
+        mockMvc.perform(post("/api/v1/proposals/{publicId}/decisions/reject", rejectedPublicId)
+                        .cookie(teacherSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"content":"현재 조건에서는 실행하기 어려워 반려합니다.","decisionReason":"필수 안전 기준을 충족하지 못했습니다."}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.workflowStatus").value("REJECTED"));
+        mockMvc.perform(get("/api/v1/proposals/{publicId}", rejectedPublicId).cookie(studentSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.officialResponses.length()").value(2))
+                .andExpect(jsonPath("$.officialResponses[0].resultingStatus").value("ON_HOLD"))
+                .andExpect(jsonPath("$.officialResponses[1].resultingStatus").value("REJECTED"));
+    }
+
+    @Test
+    void concurrentTeacherAssignmentsKeepExactlyOneCurrentAssignee() throws Exception {
+        SeedAccount admin = insertUser(
+                "concurrent.assignment.admin", "동시 지정 관리자", "ACTIVE", "SUPER_ADMIN");
+        SeedAccount firstTeacher = insertUser(
+                "concurrent.assignment.first", "동시 지정 교사 1", "ACTIVE", "TEACHER");
+        SeedAccount secondTeacher = insertUser(
+                "concurrent.assignment.second", "동시 지정 교사 2", "ACTIVE", "TEACHER");
+        SeedAccount student = insertUser(
+                "concurrent.assignment.student", "동시 지정 학생", "ACTIVE", "STUDENT");
+        UUID publicId = createFormalProposal(student, "담당 교사 동시 지정 검증");
+        AuthPrincipal adminPrincipal = new AuthPrincipal(
+                admin.id(), admin.publicId(), admin.loginId(), admin.loginId(),
+                1, Instant.now(), List.of("ROLE_SUPER_ADMIN"));
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            Future<?> first = executor.submit(() -> {
+                ready.countDown();
+                start.await();
+                return proposalAssignmentService.assign(
+                        adminPrincipal, publicId, firstTeacher.publicId(),
+                        "첫 동시 지정", "concurrent-assignment-first");
+            });
+            Future<?> second = executor.submit(() -> {
+                ready.countDown();
+                start.await();
+                return proposalAssignmentService.assign(
+                        adminPrincipal, publicId, secondTeacher.publicId(),
+                        "두 번째 동시 지정", "concurrent-assignment-second");
+            });
+            ready.await();
+            start.countDown();
+            first.get();
+            second.get();
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM proposal_teacher_assignments", Integer.class)).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM proposal_teacher_assignments WHERE unassigned_at IS NULL", Integer.class))
+                .isEqualTo(1);
+        String currentTeacher = jdbcTemplate.queryForObject("""
+                        SELECT BIN_TO_UUID(assignment.teacher_user_id)
+                        FROM proposal_teacher_assignments assignment
+                        WHERE assignment.unassigned_at IS NULL
+                        """, String.class);
+        assertThat(currentTeacher).isIn(firstTeacher.id().toString(), secondTeacher.id().toString());
+    }
+
+    @Test
+    void reportsUseFixedThreeReviewerCasesAndRevealIdentityOnlyOnce() throws Exception {
+        SeedAccount author = createActiveAccount(
+                "moderation.author", "익명 제안 작성자", "STUDENT", "author secure passphrase");
+        createActiveAccount(
+                "moderation.reporter", "신고 학생", "STUDENT", "reporter secure passphrase");
+        SeedAccount studentAffairs = createActiveAccount(
+                "moderation.teacher", "학생부장", "TEACHER", "teacher secure passphrase");
+        SeedAccount president = createActiveAccount(
+                "moderation.president", "학생회장", "STUDENT", "president secure passphrase");
+        SeedAccount vicePresident = createActiveAccount(
+                "moderation.vice", "학생부회장", "STUDENT", "vice secure passphrase");
+        createActiveAccount(
+                "moderation.admin", "심의 불가 관리자", "SUPER_ADMIN", "admin secure passphrase");
+        assignOfficeForTest(studentAffairs, "STUDENT_AFFAIRS_TEACHER");
+        assignOfficeForTest(president, "STUDENT_COUNCIL_PRESIDENT");
+        assignOfficeForTest(vicePresident, "STUDENT_COUNCIL_VICE_PRESIDENT");
+
+        UUID proposalPublicId = proposalService.create(
+                studentPrincipal(author),
+                "심의 분리 검증 제안",
+                "신고만으로 숨김이나 신원 공개가 일어나지 않아야 합니다.",
+                AuthorVisibility.ANONYMOUS,
+                "moderation-proposal-trace").publicId();
+        Cookie reporterSession = requireSessionCookie(login(
+                "moderation.reporter", "reporter secure passphrase"));
+        Cookie teacherSession = requireSessionCookie(login(
+                "moderation.teacher", "teacher secure passphrase"));
+        Cookie presidentSession = requireSessionCookie(login(
+                "moderation.president", "president secure passphrase"));
+        Cookie viceSession = requireSessionCookie(login(
+                "moderation.vice", "vice secure passphrase"));
+        Cookie adminSession = requireSessionCookie(login(
+                "moderation.admin", "admin secure passphrase"));
+
+        MvcResult firstReport = mockMvc.perform(post(
+                                "/api/v1/proposals/{publicId}/reports", proposalPublicId)
+                        .cookie(reporterSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"개인정보 포함 여부 확인 요청\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.publicId").isString())
+                .andReturn();
+        UUID reportPublicId = UUID.fromString(objectMapper.readTree(
+                firstReport.getResponse().getContentAsString()).get("publicId").asText());
+        mockMvc.perform(post("/api/v1/proposals/{publicId}/reports", proposalPublicId)
+                        .cookie(reporterSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"중복 신고 요청\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.publicId").value(reportPublicId.toString()));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM content_reports", Integer.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT visibility_status FROM proposals WHERE public_id = UUID_TO_BIN(?)",
+                String.class, proposalPublicId.toString())).isEqualTo("VISIBLE");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM identity_reveal_records", Integer.class)).isZero();
+
+        mockMvc.perform(get("/api/v1/moderation/reports").cookie(teacherSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].proposalPublicId").value(proposalPublicId.toString()))
+                .andExpect(jsonPath("$[0].proposalTitle").value("심의 분리 검증 제안"))
+                .andExpect(jsonPath("$[0].existingCaseTypes").isEmpty());
+        mockMvc.perform(post("/api/v1/moderation/reports/{reportPublicId}/cases", reportPublicId)
+                        .cookie(adminSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"caseType\":\"CONTENT_VISIBILITY\",\"reason\":\"권한 없는 생성\"}"))
+                .andExpect(status().isForbidden());
+
+        MvcResult visibilityCaseResult = mockMvc.perform(post(
+                                "/api/v1/moderation/reports/{reportPublicId}/cases", reportPublicId)
+                        .cookie(teacherSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"caseType":"CONTENT_VISIBILITY","reason":"공개 제한 필요성 분리 심의"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.caseType").value("CONTENT_VISIBILITY"))
+                .andExpect(jsonPath("$.caseStatus").value("PENDING"))
+                .andReturn();
+        UUID visibilityCaseId = UUID.fromString(objectMapper.readTree(
+                visibilityCaseResult.getResponse().getContentAsString()).get("publicId").asText());
+
+        MvcResult identityCaseResult = mockMvc.perform(post(
+                                "/api/v1/moderation/reports/{reportPublicId}/cases", reportPublicId)
+                        .cookie(teacherSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"caseType":"IDENTITY_REVEAL","reason":"작성자 확인 필요성 분리 심의"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.caseType").value("IDENTITY_REVEAL"))
+                .andReturn();
+        UUID identityCaseId = UUID.fromString(objectMapper.readTree(
+                identityCaseResult.getResponse().getContentAsString()).get("publicId").asText());
+        assertThat(identityCaseResult.getResponse().getContentAsString())
+                .doesNotContain(author.loginId(), author.publicId().toString(), "익명 제안 작성자");
+
+        mockMvc.perform(post("/api/v1/moderation/reports/{reportPublicId}/cases", reportPublicId)
+                        .cookie(teacherSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"caseType\":\"CONTENT_VISIBILITY\",\"reason\":\"중복 사건\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MODERATION_CASE_CONFLICT"));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM moderation_reviewer_snapshots", Integer.class)).isEqualTo(6);
+
+        vote(teacherSession, visibilityCaseId, "approve", "공개 제한에 동의합니다.", "PENDING");
+        vote(presidentSession, visibilityCaseId, "approve", "학생회장 승인입니다.", "PENDING");
+        vote(viceSession, visibilityCaseId, "approve", "학생부회장 승인입니다.", "APPROVED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT visibility_status FROM proposals WHERE public_id = UUID_TO_BIN(?)",
+                String.class, proposalPublicId.toString())).isEqualTo("HIDDEN_BY_DECISION");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM proposal_visibility_history", Integer.class)).isEqualTo(1);
+        mockMvc.perform(get("/api/v1/proposals/{publicId}", proposalPublicId).cookie(reporterSession))
+                .andExpect(status().isNotFound());
+
+        vote(teacherSession, identityCaseId, "approve", "신원 확인에 동의합니다.", "PENDING");
+        vote(presidentSession, identityCaseId, "approve", "학생회장 승인입니다.", "PENDING");
+        vote(viceSession, identityCaseId, "approve", "학생부회장 승인입니다.", "APPROVED");
+        mockMvc.perform(post("/api/v1/identity-reveal-cases/{publicId}/reveal", identityCaseId)
+                        .cookie(presidentSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"학생회장 확인 시도\"}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/identity-reveal-cases/{publicId}/reveal", identityCaseId)
+                        .cookie(adminSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"관리자 확인 시도\"}"))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/api/v1/identity-reveal-cases/{publicId}/reveal", identityCaseId)
+                        .cookie(teacherSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"승인 결과에 따른 일회 확인\"}"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.loginId").value(author.loginId()))
+                .andExpect(jsonPath("$.displayName").value("익명 제안 작성자"));
+        mockMvc.perform(post("/api/v1/identity-reveal-cases/{publicId}/reveal", identityCaseId)
+                        .cookie(teacherSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"두 번째 확인 시도\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("IDENTITY_REVEAL_UNAVAILABLE"));
+
+        MvcResult caseAfterReveal = mockMvc.perform(
+                        get("/api/v1/moderation/cases/{publicId}", identityCaseId)
+                                .cookie(presidentSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.identityRevealed").value(true))
+                .andReturn();
+        assertThat(caseAfterReveal.getResponse().getContentAsString())
+                .doesNotContain(author.loginId(), author.publicId().toString(), "익명 제안 작성자");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM identity_reveal_records", Integer.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM security_throttle_states
+                        WHERE throttle_scope IN ('IDENTITY_REVEAL_ACCOUNT', 'IDENTITY_REVEAL_IP')
+                          AND failure_count = 1
+                        """, Integer.class)).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM audit_logs
+                        WHERE event_type = 'PROPOSAL_IDENTITY_REVEALED'
+                          AND actor_user_id = UUID_TO_BIN(?)
+                          AND details_json IS NULL
+                        """, Integer.class, studentAffairs.id().toString())).isEqualTo(1);
+    }
+
+    @Test
+    void moderationReviewerSnapshotSurvivesLaterOfficeChanges() {
+        SeedAccount author = insertUser(
+                "snapshot.author", "스냅샷 작성자", "ACTIVE", "STUDENT");
+        SeedAccount reporter = insertUser(
+                "snapshot.reporter", "스냅샷 신고자", "ACTIVE", "STUDENT");
+        SeedAccount studentAffairs = insertUser(
+                "snapshot.teacher", "스냅샷 학생부장", "ACTIVE", "TEACHER");
+        SeedAccount president = insertUser(
+                "snapshot.president", "스냅샷 학생회장", "ACTIVE", "STUDENT");
+        SeedAccount vicePresident = insertUser(
+                "snapshot.vice", "스냅샷 학생부회장", "ACTIVE", "STUDENT");
+        assignOfficeForTest(studentAffairs, "STUDENT_AFFAIRS_TEACHER");
+        assignOfficeForTest(president, "STUDENT_COUNCIL_PRESIDENT");
+        assignOfficeForTest(vicePresident, "STUDENT_COUNCIL_VICE_PRESIDENT");
+
+        UUID proposalPublicId = proposalService.create(
+                studentPrincipal(author), "보직 변경 후 심의", "사건 생성 시점 심의자 고정 검증",
+                AuthorVisibility.ANONYMOUS, "snapshot-proposal").publicId();
+        UUID reportPublicId = contentReportService.report(
+                studentPrincipal(reporter), proposalPublicId, "스냅샷 심의 요청", "snapshot-report")
+                .receipt().publicId();
+        AuthPrincipal creator = principal(
+                studentAffairs, "ROLE_TEACHER", "OFFICE_STUDENT_AFFAIRS_TEACHER");
+        UUID casePublicId = moderationCaseService.create(
+                creator, reportPublicId, ModerationCaseType.CONTENT_VISIBILITY,
+                "보직 변경 전 사건 생성", "snapshot-case").publicId();
+
+        jdbcTemplate.update("""
+                        UPDATE office_assignments
+                        SET ends_at = ?
+                        WHERE office_type IN (
+                            'STUDENT_AFFAIRS_TEACHER',
+                            'STUDENT_COUNCIL_PRESIDENT',
+                            'STUDENT_COUNCIL_VICE_PRESIDENT'
+                        ) AND ends_at IS NULL
+                        """, Timestamp.from(Instant.now()));
+
+        AuthPrincipal formerStudentAffairs = principal(studentAffairs, "ROLE_TEACHER");
+        AuthPrincipal formerPresident = principal(president, "ROLE_STUDENT");
+        AuthPrincipal formerVicePresident = principal(vicePresident, "ROLE_STUDENT");
+        assertThat(moderationCaseService.caseDetail(formerPresident, casePublicId).viewerOffice().name())
+                .isEqualTo("STUDENT_COUNCIL_PRESIDENT");
+        assertThat(moderationVoteService.vote(
+                formerStudentAffairs, casePublicId, ModerationVoteDecision.APPROVE,
+                "기존 학생부장 승인", "snapshot-vote-teacher")).isEqualTo(ModerationCaseStatus.PENDING);
+        assertThat(moderationVoteService.vote(
+                formerPresident, casePublicId, ModerationVoteDecision.APPROVE,
+                "기존 학생회장 승인", "snapshot-vote-president")).isEqualTo(ModerationCaseStatus.PENDING);
+        assertThat(moderationVoteService.vote(
+                formerVicePresident, casePublicId, ModerationVoteDecision.APPROVE,
+                "기존 학생부회장 승인", "snapshot-vote-vice")).isEqualTo(ModerationCaseStatus.APPROVED);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT visibility_status FROM proposals WHERE public_id = UUID_TO_BIN(?)",
+                String.class, proposalPublicId.toString())).isEqualTo("HIDDEN_BY_DECISION");
+    }
+
+    @Test
+    void bootstrapCreatesExactlyOnePendingSuperAdminWithoutStoringRawCode() {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        String rawCode = "7Kp9zT4Wh3NmQ6Rx";
+
+        UUID publicId = superAdminBootstrapService.bootstrap(
+                "initial.admin",
+                "최초 관리자",
+                rawCode,
+                now.plusSeconds(3600),
+                now,
+                "bootstrap-test-trace");
+
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT account_status FROM users WHERE public_id = UUID_TO_BIN(?)
+                        """, String.class, publicId.toString()))
+                .isEqualTo("PENDING_ACTIVATION");
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM role_assignments r
+                        JOIN users u ON u.id = r.user_id
+                        WHERE u.public_id = UUID_TO_BIN(?) AND r.role_type = 'SUPER_ADMIN'
+                        """, Integer.class, publicId.toString()))
+                .isEqualTo(1);
+        String storedCode = jdbcTemplate.queryForObject("""
+                        SELECT ac.code_hash FROM activation_codes ac
+                        JOIN users u ON u.id = ac.user_id
+                        WHERE u.public_id = UUID_TO_BIN(?)
+                        """, String.class, publicId.toString());
+        assertThat(storedCode).startsWith("$argon2id$").doesNotContain(rawCode);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM bootstrap_markers", Integer.class)).isEqualTo(1);
+
+        assertThatThrownBy(() -> superAdminBootstrapService.bootstrap(
+                "second.admin",
+                "두 번째 관리자",
+                "G8vY4mN7qR2xP9Ts",
+                now.plusSeconds(3600),
+                now,
+                "bootstrap-second-trace"))
+                .isInstanceOf(BootstrapAlreadyCompletedException.class);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users", Integer.class)).isEqualTo(1);
+    }
+
+    @Test
+    void reauthenticationAndAccountSuspensionEnforceRecentAdminAndInvalidateSessions() throws Exception {
+        createActiveAccount("lifecycle.admin", "계정 관리자", "SUPER_ADMIN", "admin secure passphrase");
+        SeedAccount student = createActiveAccount(
+                "suspended.student", "정지 학생", "STUDENT", "student secure passphrase");
+        Cookie adminSession = requireSessionCookie(login("lifecycle.admin", "admin secure passphrase"));
+        Cookie studentSession = requireSessionCookie(login("suspended.student", "student secure passphrase"));
+
+        mockMvc.perform(post("/api/v1/auth/reauthenticate")
+                        .cookie(adminSession)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"wrong admin password\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTHENTICATION_FAILED"));
+        mockMvc.perform(post("/api/v1/auth/reauthenticate")
+                        .cookie(adminSession)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"admin secure passphrase\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reauthenticatedAt").isString())
+                .andExpect(jsonPath("$.reauthenticationExpiresAt").isString());
+
+        mockMvc.perform(post("/api/v1/admin/users/{publicId}/suspensions", student.publicId())
+                        .cookie(adminSession)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"계정 도용 신고 확인\"}"))
+                .andExpect(status().isNoContent());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT account_status FROM users WHERE id = UUID_TO_BIN(?)",
+                String.class,
+                student.id().toString())).isEqualTo("SUSPENDED");
+        mockMvc.perform(get("/api/v1/auth/me").cookie(studentSession))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .with(request -> {
+                            request.setRemoteAddr("203.0.113.20");
+                            return request;
+                        })
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginId\":\"suspended.student\",\"password\":\"student secure passphrase\"}"))
+                .andExpect(status().isUnauthorized());
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT JSON_UNQUOTE(JSON_EXTRACT(details_json, '$.reason'))
+                        FROM audit_logs WHERE event_type = 'ADMIN_ACCOUNT_SUSPENDED'
+                        """, String.class)).isEqualTo("계정 도용 신고 확인");
+
+        mockMvc.perform(post("/api/v1/admin/users/{publicId}/reactivations", student.publicId())
+                        .cookie(adminSession)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"본인 확인 완료\"}"))
+                .andExpect(status().isNoContent());
+        login("suspended.student", "student secure passphrase");
+    }
+
+    @Test
+    void roleAndOfficeLifecyclesRejectOverlapAndSupportFutureReplacement() throws Exception {
+        createActiveAccount("office.admin", "보직 관리자", "SUPER_ADMIN", "admin secure passphrase");
+        SeedAccount firstTeacher = createActiveAccount(
+                "first.teacher", "현 학생부장", "TEACHER", "first teacher passphrase");
+        SeedAccount nextTeacher = createActiveAccount(
+                "next.teacher", "후임 학생부장", "TEACHER", "next teacher passphrase");
+        Cookie adminSession = requireSessionCookie(login("office.admin", "admin secure passphrase"));
+        Cookie firstTeacherSession = requireSessionCookie(login("first.teacher", "first teacher passphrase"));
+
+        mockMvc.perform(post("/api/v1/admin/users/{publicId}/roles", firstTeacher.publicId())
+                        .cookie(adminSession)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"role\":\"TEACHER\",\"reason\":\"중복 역할 시도\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ASSIGNMENT_CONFLICT"));
+
+        mockMvc.perform(post("/api/v1/admin/offices/{office}/appointments", "STUDENT_AFFAIRS_TEACHER")
+                        .cookie(adminSession)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "userPublicId", firstTeacher.publicId(),
+                                "replaceExistingAtStart", false,
+                                "reason", "현 학생부장 임명"))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.type").value("STUDENT_AFFAIRS_TEACHER"));
+        mockMvc.perform(get("/api/v1/auth/me").cookie(firstTeacherSession))
+                .andExpect(status().isUnauthorized());
+
+        Instant replacementStartsAt = Instant.now().plusSeconds(86_400).truncatedTo(ChronoUnit.MICROS);
+        mockMvc.perform(post("/api/v1/admin/offices/{office}/appointments", "STUDENT_AFFAIRS_TEACHER")
+                        .cookie(adminSession)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "userPublicId", nextTeacher.publicId(),
+                                "startsAt", replacementStartsAt,
+                                "replaceExistingAtStart", true,
+                                "reason", "다음 학기 후임 예약"))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.startsAt").value(replacementStartsAt.toString()));
+
+        Timestamp firstEndsAt = jdbcTemplate.queryForObject("""
+                        SELECT ends_at FROM office_assignments
+                        WHERE user_id = UUID_TO_BIN(?) AND office_type = 'STUDENT_AFFAIRS_TEACHER'
+                        """, Timestamp.class, firstTeacher.id().toString());
+        assertThat(firstEndsAt).isNotNull();
+        assertThat(firstEndsAt.toInstant()).isEqualTo(replacementStartsAt);
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM office_assignments
+                        WHERE office_type = 'STUDENT_AFFAIRS_TEACHER'
+                        """, Integer.class)).isEqualTo(2);
+        mockMvc.perform(get("/api/v1/admin/users/{publicId}", firstTeacher.publicId())
+                        .cookie(adminSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.roles[0].role").value("TEACHER"))
+                .andExpect(jsonPath("$.offices[0].office").value("STUDENT_AFFAIRS_TEACHER"))
+                .andExpect(jsonPath("$.offices[0].endReason").value("다음 학기 후임 예약"));
+
+        mockMvc.perform(post("/api/v1/admin/users/{publicId}/roles/{role}/end",
+                                firstTeacher.publicId(), "TEACHER")
+                        .cookie(adminSession)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"역할 선종료 시도\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ASSIGNMENT_CONFLICT"));
+
+        SeedAccount student = createActiveAccount(
+                "office.student", "일반 학생", "STUDENT", "student office passphrase");
+        mockMvc.perform(post("/api/v1/admin/offices/{office}/appointments", "STUDENT_AFFAIRS_TEACHER")
+                        .cookie(adminSession)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "userPublicId", student.publicId(),
+                                "startsAt", replacementStartsAt.plusSeconds(86_400),
+                                "replaceExistingAtStart", true,
+                                "reason", "역할 불일치 시도"))))
+                .andExpect(status().isConflict());
+    }
+
+    private MvcResult login(String loginId, String password) throws Exception {
+        return mockMvc.perform(post("/api/v1/auth/login")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginPayload(loginId, password))))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andReturn();
+    }
+
+    private Cookie requireSessionCookie(MvcResult result) {
+        Cookie cookie = result.getResponse().getCookie("SESSION");
+        assertThat(cookie).as("login response SESSION cookie").isNotNull();
+        return cookie;
+    }
+
+    private SeedAccount createPendingAccount(
+            String loginId,
+            String displayName,
+            String role,
+            String activationCode,
+            Instant expiresAt
+    ) {
+        SeedAccount account = insertUser(loginId, displayName, "PENDING_ACTIVATION", role);
+        jdbcTemplate.update("""
+                        INSERT INTO activation_codes (
+                            id, user_id, code_hash, expires_at, created_by_user_id, created_at
+                        ) VALUES (UUID_TO_BIN(?), UUID_TO_BIN(?), ?, ?, UUID_TO_BIN(?), ?)
+                        """,
+                UUID.randomUUID().toString(),
+                account.id().toString(),
+                passwordEncoder.encode(activationCode),
+                Timestamp.from(expiresAt),
+                account.id().toString(),
+                Timestamp.from(Instant.now()));
+        return account;
+    }
+
+    private SeedAccount createActiveAccount(String loginId, String displayName, String role, String password) {
+        SeedAccount account = insertUser(loginId, displayName, "ACTIVE", role);
+        Instant now = Instant.now();
+        jdbcTemplate.update("""
+                        INSERT INTO credentials (
+                            user_id, password_hash, credential_version, password_changed_at, created_at, updated_at
+                        ) VALUES (UUID_TO_BIN(?), ?, 1, ?, ?, ?)
+                        """,
+                account.id().toString(),
+                passwordEncoder.encode(password),
+                Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
+        return account;
+    }
+
+    private SeedAccount insertUser(String loginId, String displayName, String status, String role) {
+        UUID id = UUID.randomUUID();
+        UUID publicId = UUID.randomUUID();
+        Instant now = Instant.now();
+        jdbcTemplate.update("""
+                        INSERT INTO users (
+                            id, public_id, login_id, display_name, account_status, activated_at, created_at, updated_at
+                        ) VALUES (UUID_TO_BIN(?), UUID_TO_BIN(?), ?, ?, ?, ?, ?, ?)
+                        """,
+                id.toString(), publicId.toString(), loginId, displayName, status,
+                "ACTIVE".equals(status) ? Timestamp.from(now) : null,
+                Timestamp.from(now), Timestamp.from(now));
+        jdbcTemplate.update("""
+                        INSERT INTO role_assignments (
+                            id, user_id, role_type, starts_at, assigned_by_user_id, assigned_at, reason
+                        ) VALUES (UUID_TO_BIN(?), UUID_TO_BIN(?), ?, ?, NULL, ?, '통합 테스트')
+                        """,
+                UUID.randomUUID().toString(), id.toString(), role,
+                Timestamp.from(now.minusSeconds(1)), Timestamp.from(now));
+        return new SeedAccount(id, publicId, loginId);
+    }
+
+    private UUID createFormalProposal(SeedAccount creator, String title) {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        UUID publicId = proposalService.create(
+                studentPrincipal(creator),
+                title,
+                "정식 안건 처리 흐름을 검증하기 위한 제안 본문입니다.",
+                AuthorVisibility.ANONYMOUS,
+                "formal-proposal-test-trace").publicId();
+        jdbcTemplate.update("""
+                        UPDATE proposals
+                        SET workflow_status = 'FORMAL_AGENDA',
+                            formalized_at = ?, formalized_support_count = 50, updated_at = ?
+                        WHERE public_id = UUID_TO_BIN(?)
+                        """,
+                Timestamp.from(now), Timestamp.from(now), publicId.toString());
+        jdbcTemplate.update("""
+                        INSERT INTO proposal_status_history (
+                            proposal_id, from_status, to_status, changed_by_user_id,
+                            support_count_snapshot, reason, created_at
+                        )
+                        SELECT id, 'GATHERING_SUPPORT', 'FORMAL_AGENDA', NULL,
+                               50, '통합 테스트 정식 안건 승격', ?
+                        FROM proposals WHERE public_id = UUID_TO_BIN(?)
+                        """,
+                Timestamp.from(now), publicId.toString());
+        return publicId;
+    }
+
+    private void assignTeacherForTest(UUID proposalPublicId, SeedAccount teacher) {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        jdbcTemplate.update("""
+                        INSERT INTO proposal_teacher_assignments (
+                            id, proposal_id, teacher_user_id, assigned_by_user_id,
+                            assignment_reason, assigned_at
+                        )
+                        SELECT UUID_TO_BIN(?), proposal.id, UUID_TO_BIN(?), UUID_TO_BIN(?),
+                               '통합 테스트 담당 지정', ?
+                        FROM proposals proposal WHERE proposal.public_id = UUID_TO_BIN(?)
+                        """,
+                UUID.randomUUID().toString(), teacher.id().toString(), teacher.id().toString(),
+                Timestamp.from(now), proposalPublicId.toString());
+    }
+
+    private void assignOfficeForTest(SeedAccount account, String office) {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        jdbcTemplate.update("""
+                        INSERT INTO office_assignments (
+                            id, user_id, office_type, starts_at,
+                            assigned_by_user_id, assigned_at, reason
+                        ) VALUES (
+                            UUID_TO_BIN(?), UUID_TO_BIN(?), ?, ?,
+                            UUID_TO_BIN(?), ?, '통합 테스트 보직 지정'
+                        )
+                        """,
+                UUID.randomUUID().toString(), account.id().toString(), office,
+                Timestamp.from(now.minusSeconds(1)), account.id().toString(), Timestamp.from(now));
+    }
+
+    private void vote(
+            Cookie session,
+            UUID casePublicId,
+            String decision,
+            String reason,
+            String expectedStatus
+    ) throws Exception {
+        mockMvc.perform(post("/api/v1/moderation/cases/{publicId}/votes/{decision}",
+                                casePublicId, decision)
+                        .cookie(session).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("reason", reason))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.caseStatus").value(expectedStatus));
+    }
+
+    private void insertPasswordResetCode(SeedAccount account, String resetCode, Instant expiresAt) {
+        jdbcTemplate.update("""
+                        INSERT INTO password_reset_tokens (
+                            id, user_id, token_hash, expires_at, created_by_user_id, created_at
+                        ) VALUES (UUID_TO_BIN(?), UUID_TO_BIN(?), ?, ?, UUID_TO_BIN(?), ?)
+                        """,
+                UUID.randomUUID().toString(),
+                account.id().toString(),
+                passwordEncoder.encode(resetCode),
+                Timestamp.from(expiresAt),
+                account.id().toString(),
+                Timestamp.from(Instant.now()));
+    }
+
+    private AuthPrincipal studentPrincipal(SeedAccount account) {
+        return principal(account, "ROLE_STUDENT");
+    }
+
+    private AuthPrincipal principal(SeedAccount account, String... authorities) {
+        return new AuthPrincipal(
+                account.id(), account.publicId(), account.loginId(), account.loginId(),
+                1, Instant.now(), List.of(authorities));
+    }
+
+    private byte[] uuidBytes(UUID value) {
+        return ByteBuffer.allocate(16)
+                .putLong(value.getMostSignificantBits())
+                .putLong(value.getLeastSignificantBits())
+                .array();
+    }
+
+    private record LoginPayload(String loginId, String password) {
+    }
+
+    private record SeedAccount(UUID id, UUID publicId, String loginId) {
+    }
+
+    private URI uri(String path) {
+        return URI.create("http://localhost:" + port + path);
+    }
+}

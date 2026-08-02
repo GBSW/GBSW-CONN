@@ -1,0 +1,16 @@
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+server:
+  servlet:
+    session:
+      cookie:
+        secure: true
+
+app:
+  security:
+    cookie:
+      secure: true

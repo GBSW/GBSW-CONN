@@ -1,0 +1,33 @@
+name: 버그 보고
+description: 재현 가능한 일반 기능 문제를 보고합니다. 보안 취약점에는 사용하지 마세요.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "보안 또는 개인정보 문제는 공개 Issue에 작성하지 말고 비공개 채널을 사용해 주세요."
+  - type: textarea
+    id: description
+    attributes:
+      label: 문제 설명
+      description: 개인정보와 비밀을 제거한 뒤 실제 결과를 설명해 주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 재현 단계
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 기대 결과
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 버전 또는 커밋
+    validations:
+      required: true

@@ -1,96 +1,18 @@
-# ──────────────────────────────────────────────
-# Java / Gradle
-# ──────────────────────────────────────────────
-*.class
-*.jar
-*.war
-*.ear
-*.nar
-*.zip
-*.tar.gz
-*.rar
-hs_err_pid*
-replay_pid*
+.DS_Store
+.idea/
+*.iml
 
-.gradle/
-build/
-!gradle/wrapper/gradle-wrapper.jar
-!**/src/main/**/build/
-!**/src/test/**/build/
-
-# Gradle wrapper
-gradle-wrapper.jar
-
-# ──────────────────────────────────────────────
-# Spring Boot
-# ──────────────────────────────────────────────
-BOOT-INF/
-
-# ──────────────────────────────────────────────
-# Node.js / Next.js
-# ──────────────────────────────────────────────
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-.pnpm-store/
-
-.next/
-out/
-.cache/
-dist/
-build/
-
-# Next.js telemetry
-.next/telemetry/
-
-# ──────────────────────────────────────────────
-# 환경변수 — 실제 .env 파일은 절대 커밋하지 않는다.
-# ──────────────────────────────────────────────
 .env
 .env.*
 !.env.example
+.bootstrap/
 
-# ──────────────────────────────────────────────
-# IDE — IntelliJ IDEA
-# ──────────────────────────────────────────────
-.idea/
-*.iws
-*.iml
-*.ipr
-out/
+backend/.gradle/
+backend/build/
 
-# ──────────────────────────────────────────────
-# IDE — VS Code
-# ──────────────────────────────────────────────
-.vscode/
-*.code-workspace
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/*.tsbuildinfo
 
-# ──────────────────────────────────────────────
-# macOS
-# ──────────────────────────────────────────────
-.DS_Store
-.AppleDouble
-.LSOverride
-._*
-.Spotlight-V100
-.Trashes
-
-# ──────────────────────────────────────────────
-# Windows
-# ──────────────────────────────────────────────
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-
-# ──────────────────────────────────────────────
-# Linux
-# ──────────────────────────────────────────────
-*~
-
-# ──────────────────────────────────────────────
-# 로그
-# ──────────────────────────────────────────────
 *.log
-logs/
