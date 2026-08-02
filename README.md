@@ -75,6 +75,8 @@ docker-compose.yml
 | Next.js | 16.2.11 Active LTS | [2026년 7월 보안 릴리스](https://nextjs.org/blog) |
 | React | 19.2.8 | Next.js 16 호환 안정판 |
 | TypeScript | 5.9.3 | `openapi-typescript` 7.x의 `^5.x` peer 범위와 호환 |
+| A stryx | 0.2.0 | 중립 테마, 접근성 기본값, 반응형 앱 셸과 공통 컴포넌트 |
+| Playwright | 1.62.1 | 브라우저 기반 핵심 역할·권한·반응형 흐름 검증 |
 | MySQL | 8.4.10 LTS | [기능 변화가 제한된 LTS 보안 패치](https://dev.mysql.com/doc/relnotes/mysql/8.4/en/news-8-4-10.html) |
 
 `package-lock.json`, Gradle wrapper와 dependency lock으로 재현 가능한 해석 결과를 유지한다. 프런트는 알려진 transitive 취약점을 피하기 위해 호환되는 `postcss`와 `sharp` 보안 버전을 overrides로 고정한다.
@@ -158,6 +160,8 @@ npm run dev
 
 브라우저에서 `http://localhost:3000`을 연다. `/activate`, `/login`, `/password-reset` 화면은 실제 API, CSRF 토큰과 MySQL 세션을 사용한다. `/proposals`에서 제안·동의·공식 답변을 확인하고, 고정 심의자는 `/moderation`에서 신고 사건과 의결을 처리한다.
 
+프런트 UI는 `@astryxdesign/core`와 `@astryxdesign/theme-neutral`을 기준으로 구성한다. 컴포넌트 선택, 토큰, 접근성, 앱 셸 규칙은 [프런트 에이전트 가이드](frontend/AGENTS.md), 실제 시각 언어는 [디자인 시스템](DESIGN.md)을 따른다.
+
 ## 14. 최초 슈퍼 어드민과 시드 데이터
 
 공통 초기 비밀번호, 하드코딩 계정, 운영 마이그레이션 속 시드 사용자는 만들지 않는다. 빈 DB에서 최초 한 번 다음 명령으로 활성화 대기 슈퍼 어드민을 생성한다.
@@ -226,7 +230,15 @@ npm run check
 npm audit
 ```
 
-핵심 권한·동시성·E2E 테스트는 각 도메인 구현과 함께 추가한다. 인메모리 DB만으로 DB 불변조건을 검증하지 않는다.
+실제 MySQL, Spring Boot, Next.js와 Chromium을 격리된 임의 포트에서 함께 실행하는 전체 E2E 검증:
+
+```bash
+cd frontend
+npx playwright install chromium
+npm run e2e
+```
+
+E2E는 빈 MySQL에 Flyway 마이그레이션을 적용하고 학생 50명, 교사, 관리자, 고정 심의자를 실제 API로 준비한 뒤 공개 제안, 정식 안건, 공식 답변, 관리자 지정, 3인 심의, 학생부장 일회 신원 확인을 검증한다. 종료 시 컨테이너와 프로세스를 정리하며 실패 진단 파일은 `frontend/test-results`와 임시 진단 디렉터리에 남긴다. GitHub Actions도 같은 `npm run e2e`를 실행한다. 인메모리 DB만으로 DB 불변조건을 검증하지 않는다.
 
 ## 18. 주요 설정
 

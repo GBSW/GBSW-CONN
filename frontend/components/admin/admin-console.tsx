@@ -2,8 +2,26 @@
 
 import type { components } from "@/lib/api-schema";
 import { ApiRequestError, apiGet, apiPost, errorMessage } from "@/lib/api-client";
-import Link from "next/link";
-import type { FormEvent, ReactNode } from "react";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
+import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
+import { Collapsible, CollapsibleGroup } from "@astryxdesign/core/Collapsible";
+import { DateTimeInput, type ISODateTimeString } from "@astryxdesign/core/DateTimeInput";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { Heading } from "@astryxdesign/core/Heading";
+import { List, ListItem } from "@astryxdesign/core/List";
+import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
+import { Pagination } from "@astryxdesign/core/Pagination";
+import { Section } from "@astryxdesign/core/Section";
+import { Selector } from "@astryxdesign/core/Selector";
+import { Spinner } from "@astryxdesign/core/Spinner";
+import { HStack, VStack } from "@astryxdesign/core/Stack";
+import { StatusDot } from "@astryxdesign/core/StatusDot";
+import { Text } from "@astryxdesign/core/Text";
+import { TextArea } from "@astryxdesign/core/TextArea";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 
 type CurrentUser = components["schemas"]["CurrentUserResponse"];
@@ -21,6 +39,7 @@ type OfficeType =
   | "STUDENT_AFFAIRS_TEACHER"
   | "STUDENT_COUNCIL_PRESIDENT"
   | "STUDENT_COUNCIL_VICE_PRESIDENT";
+type AdminConsoleMode = "accounts" | "create" | "offices";
 
 const statusLabels: Record<string, string> = {
   PENDING_ACTIVATION: "활성화 대기",
@@ -66,22 +85,41 @@ function periodText(startsAt?: string, endsAt?: string): string {
   return `${formatInstant(startsAt)} – ${formatInstant(endsAt)}`;
 }
 
-function Field({ label, htmlFor, children, help }: {
-  label: string;
-  htmlFor: string;
-  children: ReactNode;
-  help?: string;
-}) {
+const roleOptions = roles.map((role) => ({ value: role, label: roleLabels[role] }));
+const officeOptions = offices.map((office) => ({ value: office, label: officeLabels[office] }));
+const statusOptions = [{ value: "", label: "전체" }, ...Object.entries(statusLabels).map(([value, label]) => ({ value, label }))];
+
+function FormText({ label, name, type = "text", description }: { label: string; name: string; type?: "text" | "password"; description?: string }) {
+  const [value, setValue] = useState("");
+  return <TextInput label={label} description={description} htmlName={name} type={type} value={value} onChange={setValue} isRequired width="100%" />;
+}
+
+function FormArea({ label, name, description }: { label: string; name: string; description?: string }) {
+  const [value, setValue] = useState("");
+  return <TextArea label={label} description={description} htmlName={name} value={value} onChange={setValue} maxLength={500} rows={4} isRequired width="100%" />;
+}
+
+function FormSelect({ label, name, options, initial }: { label: string; name: string; options: Array<{ value: string; label: string }>; initial?: string }) {
+  const [value, setValue] = useState(initial ?? options[0]?.value ?? "");
+  return <Selector label={label} htmlName={name} options={options} value={value} onChange={setValue} width="100%" />;
+}
+
+function FormDateTime({ label, name }: { label: string; name: string }) {
+  const [value, setValue] = useState<ISODateTimeString | undefined>();
   return (
-    <div className="field">
-      <label htmlFor={htmlFor}>{label}</label>
-      {children}
-      {help ? <p className="field-help">{help}</p> : null}
-    </div>
+    <VStack gap={1}>
+      <DateTimeInput label={label} value={value} onChange={setValue} hourFormat="24h" hasClear isOptional width="100%" timeLabel={`${label} 시각`} />
+      <input type="hidden" name={name} value={value ?? ""} />
+    </VStack>
   );
 }
 
-export function AdminConsole() {
+function FormCheckbox({ label, name }: { label: string; name: string }) {
+  const [value, setValue] = useState(false);
+  return <CheckboxInput label={label} htmlName={name} value={value} onChange={setValue} />;
+}
+
+export function AdminConsole({ mode = "accounts" }: { mode?: AdminConsoleMode }) {
   const [access, setAccess] = useState<"loading" | "ready" | "signed-out" | "forbidden" | "error">("loading");
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [inputQuery, setInputQuery] = useState("");
@@ -121,7 +159,7 @@ export function AdminConsole() {
   }, []);
 
   useEffect(() => {
-    if (access !== "ready") return;
+    if (access !== "ready" || mode === "create") return;
     let active = true;
     const parameters = new URLSearchParams({ page: String(page), size: "20" });
     if (query) parameters.set("query", query);
@@ -148,10 +186,10 @@ export function AdminConsole() {
     return () => {
       active = false;
     };
-  }, [access, page, query, refreshVersion, status]);
+  }, [access, mode, page, query, refreshVersion, status]);
 
   useEffect(() => {
-    if (access !== "ready" || !selectedId) return;
+    if (access !== "ready" || mode === "create" || !selectedId) return;
     let active = true;
     apiGet<AccountDetail>(`/api/v1/admin/users/${selectedId}`)
       .then((result) => {
@@ -172,7 +210,7 @@ export function AdminConsole() {
     return () => {
       active = false;
     };
-  }, [access, refreshVersion, selectedId]);
+  }, [access, mode, refreshVersion, selectedId]);
 
   async function execute<T>(
     action: () => Promise<T>,
@@ -351,272 +389,216 @@ export function AdminConsole() {
     );
   }
 
-  if (access === "loading") {
-    return <p className="admin-state" role="status">관리 권한을 확인하고 있습니다…</p>;
-  }
-  if (access === "signed-out") {
-    return (
-      <section className="admin-state">
-        <h2>로그인이 필요합니다</h2>
-        <p>계정 관리 화면은 슈퍼 어드민만 사용할 수 있습니다.</p>
-        <Link className="primary-link" href="/login">로그인</Link>
-      </section>
-    );
-  }
-  if (access === "forbidden") {
-    return (
-      <section className="admin-state">
-        <h2>접근 권한이 없습니다</h2>
-        <p>현재 계정에는 슈퍼 어드민 역할이 없습니다.</p>
-        <Link href="/">서비스 홈으로 돌아가기</Link>
-      </section>
-    );
-  }
-  if (access === "error") {
-    return <p className="form-error" role="alert">관리 권한을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.</p>;
-  }
+  if (access === "loading") return <Spinner size="lg" label="관리 권한을 확인하고 있습니다…" />;
+  if (access === "signed-out") return <EmptyState title="로그인이 필요합니다" description="계정 관리 화면은 슈퍼 어드민만 사용할 수 있습니다." actions={<Button label="로그인" href="/login" variant="primary" />} />;
+  if (access === "forbidden") return <EmptyState title="접근 권한이 없습니다" description="현재 계정에는 슈퍼 어드민 역할이 없습니다." actions={<Button label="서비스 홈" href="/" />} />;
+  if (access === "error") return <Banner status="error" title="관리 권한을 확인하지 못했습니다" description="잠시 후 다시 시도해 주세요." />;
 
   return (
-    <div className="admin-console">
-      <section className="admin-session" aria-labelledby="session-title">
-        <div>
-          <h2 id="session-title">{currentUser?.displayName}</h2>
-          <p>
-            최근 본인 확인 유효 시각: {formatInstant(currentUser?.reauthenticationExpiresAt)}
-          </p>
-        </div>
-        <button className="secondary-button" type="button" onClick={() => setShowReauthentication((value) => !value)}>
-          비밀번호 다시 확인
-        </button>
-      </section>
+    <VStack gap={8}>
+      <Section variant="muted" padding={5} aria-labelledby="session-title">
+        <HStack hAlign="between" vAlign="center" gap={4} wrap="wrap">
+          <VStack gap={1}>
+            <Heading level={2} id="session-title">{currentUser?.displayName}</Heading>
+            <Text as="p" color="secondary">최근 본인 확인 유효 시각: {formatInstant(currentUser?.reauthenticationExpiresAt)}</Text>
+          </VStack>
+          <Button label="비밀번호 다시 확인" variant="secondary" onClick={() => setShowReauthentication((value) => !value)} />
+        </HStack>
+      </Section>
 
       {showReauthentication ? (
-        <form className="inline-form reauthentication" onSubmit={reauthenticate}>
-          <Field label="현재 비밀번호" htmlFor="reauth-password">
-            <input id="reauth-password" name="password" type="password" autoComplete="current-password" required />
-          </Field>
-          <button className="primary-button" type="submit" disabled={actionPending}>본인 확인</button>
-        </form>
-      ) : null}
-
-      {actionError ? <p className="form-error" role="alert">{actionError}</p> : null}
-      {notice ? <p className="form-notice" role="status">{notice}</p> : null}
-      {codeNotice ? (
-        <section className="one-time-code" aria-labelledby="code-title">
-          <div>
-            <p className="eyebrow">한 번만 표시됩니다</p>
-            <h2 id="code-title">{codeNotice.title}</h2>
-            <code>{codeNotice.value.code}</code>
-            <p>만료: {formatInstant(codeNotice.value.expiresAt)}</p>
-            <p>안전한 경로로 당사자에게 전달한 뒤 이 화면에서 지워 주세요.</p>
-          </div>
-          <button className="secondary-button" type="button" onClick={() => setCodeNotice(null)}>코드 지우기</button>
-        </section>
-      ) : null}
-
-      <section className="admin-section" aria-labelledby="create-title">
-        <div className="admin-section-heading">
-          <p className="section-index">01</p>
-          <h2 id="create-title">새 계정 만들기</h2>
-          <p>활성화 대기 계정과 첫 역할을 만들고 가입 코드를 한 번 발급합니다.</p>
-        </div>
-        <form className="admin-form" onSubmit={createAccount}>
-          <Field label="로그인 ID" htmlFor="create-login-id">
-            <input id="create-login-id" name="loginId" pattern="[A-Za-z0-9._-]{3,100}" required />
-          </Field>
-          <Field label="표시 이름" htmlFor="create-display-name">
-            <input id="create-display-name" name="displayName" maxLength={100} required />
-          </Field>
-          <Field label="첫 역할" htmlFor="create-role">
-            <select id="create-role" name="role" defaultValue="STUDENT">
-              {roles.map((role) => <option value={role} key={role}>{roleLabels[role]}</option>)}
-            </select>
-          </Field>
-          <Field label="발급 사유" htmlFor="create-reason">
-            <textarea id="create-reason" name="reason" maxLength={500} required />
-          </Field>
-          <button className="primary-button" type="submit" disabled={actionPending}>계정 만들기</button>
-        </form>
-      </section>
-
-      <section className="admin-section" aria-labelledby="accounts-title">
-        <div className="admin-section-heading">
-          <p className="section-index">02</p>
-          <h2 id="accounts-title">계정 찾기</h2>
-          <p>로그인 ID나 표시 이름으로 검색하고 관리할 계정을 선택합니다.</p>
-        </div>
-        <div>
-          <form className="search-form" onSubmit={search}>
-            <Field label="계정 검색" htmlFor="account-query">
-              <input
-                id="account-query"
-                value={inputQuery}
-                onChange={(event) => setInputQuery(event.target.value)}
-                maxLength={100}
-                placeholder="로그인 ID 또는 이름"
-              />
-            </Field>
-            <Field label="상태" htmlFor="account-status">
-              <select
-                id="account-status"
-                value={status}
-                onChange={(event) => {
-                  setListLoading(true);
-                  setStatus(event.target.value as AccountStatus);
-                  setPage(0);
-                }}
-              >
-                <option value="">전체</option>
-                {Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
-              </select>
-            </Field>
-            <button className="secondary-button" type="submit">검색</button>
+        <Section variant="section" padding={5}>
+          <form onSubmit={reauthenticate}>
+            <HStack gap={2} vAlign="end" wrap="wrap">
+              <FormText label="현재 비밀번호" name="password" type="password" />
+              <Button label="본인 확인" type="submit" variant="primary" isLoading={actionPending} isDisabled={actionPending} />
+            </HStack>
           </form>
-          {listError ? <p className="form-error" role="alert">{listError}</p> : null}
-          <div className="account-list" aria-busy={listLoading}>
-            {accounts?.items.length ? accounts.items.map((account) => (
-              <button
-                className={`account-row${selectedId === account.publicId ? " selected" : ""}`}
-                type="button"
-                key={account.publicId}
-                onClick={() => {
-                  setDetail(null);
-                  setDetailLoading(true);
-                  setSelectedId(account.publicId);
-                  setActionError(null);
-                  setNotice(null);
-                }}
-              >
-                <span><strong>{account.displayName}</strong><small>{account.loginId}</small></span>
-                <span>{account.currentRoles.map((role) => roleLabels[role as AccountRole] ?? role).join(", ") || "역할 없음"}</span>
-                <span>{statusLabels[account.status] ?? account.status}</span>
-              </button>
-            )) : <p className="empty-state">{listLoading ? "불러오는 중…" : "조건에 맞는 계정이 없습니다."}</p>}
-          </div>
-          <div className="pagination" aria-label="계정 목록 페이지">
-            <button className="secondary-button" type="button" disabled={page === 0 || listLoading} onClick={() => {
-              setListLoading(true);
-              setPage((value) => value - 1);
-            }}>이전</button>
-            <span>{(accounts?.totalPages ?? 0) === 0 ? "0 / 0" : `${page + 1} / ${accounts?.totalPages}`}</span>
-            <button
-              className="secondary-button"
-              type="button"
-              disabled={listLoading || !accounts || page + 1 >= accounts.totalPages}
-              onClick={() => {
-                setListLoading(true);
-                setPage((value) => value + 1);
-              }}
-            >다음</button>
-          </div>
-        </div>
-      </section>
-
-      {selectedId ? (
-        <section className="admin-section selected-account" aria-labelledby="selected-title">
-          <div className="admin-section-heading">
-            <p className="section-index">03</p>
-            <h2 id="selected-title">선택 계정 관리</h2>
-            {detail ? (
-              <p><strong>{detail.displayName}</strong><br />{detail.loginId}<br />{statusLabels[detail.status] ?? detail.status}</p>
-            ) : <p>{detailLoading ? "계정 정보를 불러오는 중…" : "계정 정보를 불러오지 못했습니다."}</p>}
-          </div>
-          {detail ? (
-            <div className="account-actions">
-              <section className="action-group" aria-labelledby="codes-title">
-                <h3 id="codes-title">계정 코드와 상태</h3>
-                <div className="button-row">
-                  {detail.status === "PENDING_ACTIVATION" ? (
-                    <button className="secondary-button" type="button" disabled={actionPending} onClick={() => issueCode("activation")}>가입 코드 재발급</button>
-                  ) : null}
-                  {detail.status === "ACTIVE" ? (
-                    <button className="secondary-button" type="button" disabled={actionPending} onClick={() => issueCode("password-reset")}>재설정 코드 발급</button>
-                  ) : null}
-                </div>
-                {detail.status === "ACTIVE" || detail.status === "SUSPENDED" ? (
-                  <form className="compact-form" onSubmit={(event) => changeStatus(event, detail.status === "ACTIVE" ? "suspensions" : "reactivations")}>
-                    <Field label={detail.status === "ACTIVE" ? "정지 사유" : "재활성화 사유"} htmlFor="status-reason">
-                      <textarea id="status-reason" name="reason" maxLength={500} required />
-                    </Field>
-                    <button className={detail.status === "ACTIVE" ? "danger-button" : "primary-button"} type="submit" disabled={actionPending}>
-                      {detail.status === "ACTIVE" ? "계정 정지" : "계정 재활성화"}
-                    </button>
-                  </form>
-                ) : null}
-              </section>
-
-              <section className="action-group" aria-labelledby="roles-title">
-                <h3 id="roles-title">역할 임기</h3>
-                <form className="compact-form" onSubmit={assignRole}>
-                  <Field label="추가할 역할" htmlFor="assign-role">
-                    <select id="assign-role" name="role">{roles.map((role) => <option value={role} key={role}>{roleLabels[role]}</option>)}</select>
-                  </Field>
-                  <div className="date-fields">
-                    <Field label="시작 시각(선택)" htmlFor="role-start"><input id="role-start" name="startsAt" type="datetime-local" /></Field>
-                    <Field label="종료 시각(선택)" htmlFor="role-end"><input id="role-end" name="endsAt" type="datetime-local" /></Field>
-                  </div>
-                  <Field label="추가 사유" htmlFor="role-reason"><textarea id="role-reason" name="reason" maxLength={500} required /></Field>
-                  <button className="primary-button" type="submit" disabled={actionPending}>역할 추가</button>
-                </form>
-                <form className="compact-form end-form" onSubmit={endRole}>
-                  <Field label="종료할 역할" htmlFor="end-role"><select id="end-role" name="role">{roles.map((role) => <option value={role} key={role}>{roleLabels[role]}</option>)}</select></Field>
-                  <Field label="종료 시각(선택)" htmlFor="end-role-at"><input id="end-role-at" name="endsAt" type="datetime-local" /></Field>
-                  <Field label="종료 사유" htmlFor="end-role-reason"><textarea id="end-role-reason" name="reason" maxLength={500} required /></Field>
-                  <button className="danger-button" type="submit" disabled={actionPending}>역할 종료</button>
-                </form>
-                <HistoryList items={detail.roles.map((item) => ({
-                  key: `${item.role}-${item.startsAt}`,
-                  title: roleLabels[item.role as AccountRole] ?? item.role ?? "역할",
-                  period: periodText(item.startsAt, item.endsAt),
-                  reason: item.endReason ?? item.reason,
-                }))} />
-              </section>
-
-              <section className="action-group" aria-labelledby="offices-title">
-                <h3 id="offices-title">보직 임기</h3>
-                <p className="field-help">학생회 보직은 학생 역할, 학생생활 담당은 교사 역할의 전체 임기가 먼저 필요합니다.</p>
-                <form className="compact-form" onSubmit={appointOffice}>
-                  <Field label="추가할 보직" htmlFor="appoint-office"><select id="appoint-office" name="office">{offices.map((office) => <option value={office} key={office}>{officeLabels[office]}</option>)}</select></Field>
-                  <div className="date-fields">
-                    <Field label="시작 시각(선택)" htmlFor="office-start"><input id="office-start" name="startsAt" type="datetime-local" /></Field>
-                    <Field label="종료 시각(선택)" htmlFor="office-end"><input id="office-end" name="endsAt" type="datetime-local" /></Field>
-                  </div>
-                  <label className="checkbox-field"><input name="replaceExistingAtStart" type="checkbox" /> 시작 시점의 현임자 임기를 종료하고 교체</label>
-                  <Field label="임명 사유" htmlFor="office-reason"><textarea id="office-reason" name="reason" maxLength={500} required /></Field>
-                  <button className="primary-button" type="submit" disabled={actionPending}>보직 추가</button>
-                </form>
-                <form className="compact-form end-form" onSubmit={endOffice}>
-                  <Field label="종료할 보직" htmlFor="end-office"><select id="end-office" name="office">{offices.map((office) => <option value={office} key={office}>{officeLabels[office]}</option>)}</select></Field>
-                  <Field label="종료 시각(선택)" htmlFor="end-office-at"><input id="end-office-at" name="endsAt" type="datetime-local" /></Field>
-                  <Field label="종료 사유" htmlFor="end-office-reason"><textarea id="end-office-reason" name="reason" maxLength={500} required /></Field>
-                  <button className="danger-button" type="submit" disabled={actionPending}>보직 종료</button>
-                </form>
-                <HistoryList items={detail.offices.map((item) => ({
-                  key: `${item.office}-${item.startsAt}`,
-                  title: officeLabels[item.office as OfficeType] ?? item.office ?? "보직",
-                  period: periodText(item.startsAt, item.endsAt),
-                  reason: item.endReason ?? item.reason,
-                }))} />
-              </section>
-            </div>
-          ) : null}
-        </section>
+        </Section>
       ) : null}
-    </div>
+
+      {actionError ? <Banner status="error" title="작업을 완료할 수 없습니다" description={actionError} /> : null}
+      {notice ? <Banner status="success" title={notice} /> : null}
+      {codeNotice ? (
+        <Card padding={6} variant="yellow" elevation="med">
+          <HStack hAlign="between" vAlign="center" gap={4} wrap="wrap">
+            <VStack gap={2}>
+              <Heading level={2}>{codeNotice.title} · 한 번만 표시</Heading>
+              <Text type="code" as="p" className="wrap-anywhere">{codeNotice.value.code}</Text>
+              <Text as="p">만료: {formatInstant(codeNotice.value.expiresAt)}</Text>
+              <Text type="supporting" as="p">안전한 경로로 당사자에게 전달한 뒤 이 화면에서 지워 주세요.</Text>
+            </VStack>
+            <Button label="코드 지우기" variant="destructive" onClick={() => setCodeNotice(null)} />
+          </HStack>
+        </Card>
+      ) : null}
+
+      {mode === "create" ? <VStack as="section" gap={4} aria-labelledby="create-title">
+        <VStack gap={1} maxWidth="72ch">
+          <Heading level={2} id="create-title">새 계정 만들기</Heading>
+          <Text as="p" color="secondary">활성화 대기 계정과 첫 역할을 만들고 가입 코드를 한 번 발급합니다.</Text>
+        </VStack>
+        <Section variant="section" padding={5}>
+          <form onSubmit={createAccount}>
+            <VStack gap={4}>
+              <HStack gap={3} vAlign="start" wrap="wrap">
+                <FormText label="로그인 ID" name="loginId" description="영문, 숫자, 마침표, 밑줄, 하이픈을 사용합니다." />
+                <FormText label="표시 이름" name="displayName" />
+                <FormSelect label="첫 역할" name="role" options={roleOptions} initial="STUDENT" />
+              </HStack>
+              <FormArea label="발급 사유" name="reason" />
+              <Button label="계정 만들기" type="submit" variant="primary" isLoading={actionPending} isDisabled={actionPending} />
+            </VStack>
+          </form>
+        </Section>
+      </VStack> : null}
+
+      {mode !== "create" ? <VStack as="section" gap={4} aria-labelledby="accounts-title">
+        <VStack gap={1} maxWidth="72ch">
+          <Heading level={2} id="accounts-title">계정 찾기</Heading>
+          <Text as="p" color="secondary">로그인 ID나 표시 이름으로 검색하고 관리할 계정을 선택합니다.</Text>
+        </VStack>
+        <form onSubmit={search}>
+          <HStack gap={2} vAlign="end" wrap="wrap">
+            <TextInput label="계정 검색" value={inputQuery} onChange={setInputQuery} placeholder="로그인 ID 또는 이름" hasClear width="min(100%, 28rem)" />
+            <Selector label="상태" options={statusOptions} value={status} onChange={(value) => { setListLoading(true); setStatus(value as AccountStatus); setPage(0); }} width="12rem" />
+            <Button label="검색" type="submit" variant="secondary" isLoading={listLoading} />
+          </HStack>
+        </form>
+        {listError ? <Banner status="error" title="계정 목록을 불러오지 못했습니다" description={listError} /> : null}
+        {listLoading && !accounts ? <Spinner label="계정을 불러오는 중…" /> : accounts?.items.length ? (
+          <List hasDividers density="balanced" aria-busy={listLoading}>
+            {accounts.items.map((account) => {
+              const variant = account.status === "ACTIVE" ? "success" : account.status === "SUSPENDED" ? "warning" : account.status === "DEACTIVATED" ? "neutral" : "accent";
+              return (
+                <ListItem
+                  key={account.publicId}
+                  isSelected={selectedId === account.publicId}
+                  onClick={() => { setDetail(null); setDetailLoading(true); setSelectedId(account.publicId); setActionError(null); setNotice(null); }}
+                  label={
+                    <HStack hAlign="between" vAlign="center" gap={4} wrap="wrap">
+                      <VStack gap={1}>
+                        <Heading level={3}>{account.displayName}</Heading>
+                        <Text type="supporting" color="secondary">{account.loginId}</Text>
+                      </VStack>
+                      <Text type="supporting">{account.currentRoles.map((role) => roleLabels[role as AccountRole] ?? role).join(", ") || "역할 없음"}</Text>
+                    </HStack>
+                  }
+                  endContent={<HStack gap={1} vAlign="center"><StatusDot variant={variant} label={statusLabels[account.status] ?? account.status} /><Text type="supporting">{statusLabels[account.status] ?? account.status}</Text></HStack>}
+                />
+              );
+            })}
+          </List>
+        ) : <EmptyState title="조건에 맞는 계정이 없습니다" isCompact />}
+        {accounts && accounts.totalPages > 1 ? (
+          <HStack hAlign="center"><Pagination page={page + 1} totalPages={accounts.totalPages} onChange={(value) => { setListLoading(true); setPage(value - 1); }} isDisabled={listLoading} label="계정 목록 페이지" /></HStack>
+        ) : null}
+      </VStack> : null}
+
+      {mode !== "create" && selectedId ? (
+        <VStack as="section" gap={5} aria-labelledby="selected-title">
+          <Heading level={2} id="selected-title">선택 계정 관리</Heading>
+          {detail ? (
+            <>
+              <Section variant="muted" padding={5}>
+                <MetadataList orientation="horizontal">
+                  <MetadataListItem label="이름">{detail.displayName}</MetadataListItem>
+                  <MetadataListItem label="로그인 ID">{detail.loginId}</MetadataListItem>
+                  <MetadataListItem label="상태">{statusLabels[detail.status] ?? detail.status}</MetadataListItem>
+                </MetadataList>
+              </Section>
+
+              {mode === "accounts" ? (
+                <CollapsibleGroup type="single" defaultValue="codes" hasDividers density="spacious">
+                  <Collapsible trigger="계정 코드 발급" value="codes">
+                    <HStack gap={2} wrap="wrap">
+                      {detail.status === "PENDING_ACTIVATION" ? <Button label="가입 코드 재발급" variant="secondary" isDisabled={actionPending} onClick={() => issueCode("activation")} /> : null}
+                      {detail.status === "ACTIVE" ? <Button label="재설정 코드 발급" variant="secondary" isDisabled={actionPending} onClick={() => issueCode("password-reset")} /> : null}
+                      {detail.status !== "PENDING_ACTIVATION" && detail.status !== "ACTIVE" ? <Text color="secondary">현재 상태에서는 발급할 수 있는 코드가 없습니다.</Text> : null}
+                    </HStack>
+                  </Collapsible>
+                  <Collapsible trigger="계정 상태 변경" value="status">
+                    {detail.status === "ACTIVE" || detail.status === "SUSPENDED" ? (
+                      <Section variant="section" padding={4}>
+                        <form onSubmit={(event) => changeStatus(event, detail.status === "ACTIVE" ? "suspensions" : "reactivations")}>
+                          <VStack gap={3}>
+                            <FormArea label={detail.status === "ACTIVE" ? "정지 사유" : "재활성화 사유"} name="reason" />
+                            <Button label={detail.status === "ACTIVE" ? "계정 정지" : "계정 재활성화"} type="submit" variant={detail.status === "ACTIVE" ? "destructive" : "primary"} isLoading={actionPending} isDisabled={actionPending} />
+                          </VStack>
+                        </form>
+                      </Section>
+                    ) : <Text color="secondary">활성 또는 정지 계정만 상태를 변경할 수 있습니다.</Text>}
+                  </Collapsible>
+                  <Collapsible trigger="역할 추가" value="role-add">
+                    <Section variant="section" padding={4}>
+                      <form onSubmit={assignRole}><VStack gap={3}>
+                        <FormSelect label="추가할 역할" name="role" options={roleOptions} />
+                        <HStack gap={3} wrap="wrap"><FormDateTime label="시작 시각" name="startsAt" /><FormDateTime label="종료 시각" name="endsAt" /></HStack>
+                        <FormArea label="추가 사유" name="reason" />
+                        <Button label="역할 추가" type="submit" variant="primary" isLoading={actionPending} isDisabled={actionPending} />
+                      </VStack></form>
+                    </Section>
+                  </Collapsible>
+                  <Collapsible trigger="역할 종료" value="role-end">
+                    <Section variant="muted" padding={4}>
+                      <form onSubmit={endRole}><VStack gap={3}>
+                        <FormSelect label="종료할 역할" name="role" options={roleOptions} />
+                        <FormDateTime label="종료 시각" name="endsAt" />
+                        <FormArea label="종료 사유" name="reason" />
+                        <Button label="역할 종료" type="submit" variant="destructive" isLoading={actionPending} isDisabled={actionPending} />
+                      </VStack></form>
+                    </Section>
+                  </Collapsible>
+                  <Collapsible trigger="역할 이력" value="role-history">
+                    <HistoryList items={detail.roles.map((item) => ({ key: `${item.role}-${item.startsAt}`, title: roleLabels[item.role as AccountRole] ?? item.role ?? "역할", period: periodText(item.startsAt, item.endsAt), reason: item.endReason ?? item.reason }))} />
+                  </Collapsible>
+                </CollapsibleGroup>
+              ) : null}
+
+              {mode === "offices" ? (
+                <VStack gap={4}>
+                  <Text as="p" color="secondary">학생생활 담당 교사, 학생회장, 학생부회장 세 보직만 임명합니다. 먼저 위에서 대상 계정을 선택해 주세요.</Text>
+                  <CollapsibleGroup type="single" defaultValue="office-appoint" hasDividers density="spacious">
+                    <Collapsible trigger="보직 임명" value="office-appoint">
+                      <Section variant="section" padding={4}>
+                        <form onSubmit={appointOffice}><VStack gap={3}>
+                          <FormSelect label="고정 보직" name="office" options={officeOptions} />
+                          <HStack gap={3} wrap="wrap"><FormDateTime label="시작 시각" name="startsAt" /><FormDateTime label="종료 시각" name="endsAt" /></HStack>
+                          <FormCheckbox label="시작 시점의 현임자 임기를 종료하고 교체" name="replaceExistingAtStart" />
+                          <FormArea label="임명 사유" name="reason" />
+                          <Button label="보직 임명" type="submit" variant="primary" isLoading={actionPending} isDisabled={actionPending} />
+                        </VStack></form>
+                      </Section>
+                    </Collapsible>
+                    <Collapsible trigger="보직 종료" value="office-end">
+                      <Section variant="muted" padding={4}>
+                        <form onSubmit={endOffice}><VStack gap={3}>
+                          <FormSelect label="종료할 고정 보직" name="office" options={officeOptions} />
+                          <FormDateTime label="종료 시각" name="endsAt" />
+                          <FormArea label="종료 사유" name="reason" />
+                          <Button label="보직 종료" type="submit" variant="destructive" isLoading={actionPending} isDisabled={actionPending} />
+                        </VStack></form>
+                      </Section>
+                    </Collapsible>
+                    <Collapsible trigger="보직 이력" value="office-history">
+                      <HistoryList items={detail.offices.map((item) => ({ key: `${item.office}-${item.startsAt}`, title: officeLabels[item.office as OfficeType] ?? item.office ?? "보직", period: periodText(item.startsAt, item.endsAt), reason: item.endReason ?? item.reason }))} />
+                    </Collapsible>
+                  </CollapsibleGroup>
+                </VStack>
+              ) : null}
+            </>
+          ) : detailLoading ? <Spinner label="계정 정보를 불러오는 중…" /> : <Banner status="error" title="계정 정보를 불러오지 못했습니다" />}
+        </VStack>
+      ) : null}
+    </VStack>
   );
 }
 
 function HistoryList({ items }: { items: Array<{ key: string; title: string; period: string; reason?: string }> }) {
-  if (!items.length) return <p className="empty-state">저장된 임기 이력이 없습니다.</p>;
+  if (!items.length) return <EmptyState title="저장된 임기 이력이 없습니다" isCompact />;
   return (
-    <ul className="history-list">
-      {items.map((item) => (
-        <li key={item.key}>
-          <strong>{item.title}</strong>
-          <span>{item.period}</span>
-          {item.reason ? <small>{item.reason}</small> : null}
-        </li>
-      ))}
-    </ul>
+    <List hasDividers density="compact">
+      {items.map((item) => <ListItem key={item.key} label={item.title} description={`${item.period}${item.reason ? ` · ${item.reason}` : ""}`} />)}
+    </List>
   );
 }

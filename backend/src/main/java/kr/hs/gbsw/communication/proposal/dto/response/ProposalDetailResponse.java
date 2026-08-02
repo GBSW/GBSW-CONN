@@ -22,6 +22,8 @@ public record ProposalDetailResponse(
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED) boolean viewerSupported,
         @Schema(description = "현재 조회자가 내부 지정된 활성 담당 교사인지 여부")
         boolean viewerCanManage,
+        @Schema(description = "현재 조회자가 동의 모집 중인 제안의 작성자인지 여부")
+        boolean viewerCanEdit,
         Instant formalizedAt,
         Integer formalizedSupportCount,
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED) Instant createdAt,
@@ -34,7 +36,7 @@ public record ProposalDetailResponse(
             List<ProposalStatusHistoryRecord> history,
             int supportThreshold
     ) {
-        return from(proposal, history, List.of(), false, supportThreshold);
+        return from(proposal, history, List.of(), false, true, supportThreshold);
     }
 
     public static ProposalDetailResponse from(
@@ -42,13 +44,14 @@ public record ProposalDetailResponse(
             List<ProposalStatusHistoryRecord> history,
             List<ProposalOfficialResponseRecord> officialResponses,
             boolean viewerCanManage,
+            boolean viewerCanEdit,
             int supportThreshold
     ) {
         return new ProposalDetailResponse(
                 proposal.publicId(), proposal.title(), proposal.content(),
                 proposal.authorVisibility().name(), proposal.authorDisplayName(),
                 proposal.workflowStatus().name(), proposal.visibilityStatus().name(),
-                proposal.supportCount(), supportThreshold, proposal.viewerSupported(), viewerCanManage,
+                proposal.supportCount(), supportThreshold, proposal.viewerSupported(), viewerCanManage, viewerCanEdit,
                 proposal.formalizedAt(), proposal.formalizedSupportCount(), proposal.createdAt(),
                 history.stream().map(ProposalStatusHistoryResponse::from).toList(),
                 officialResponses.stream().map(ProposalOfficialResponseResponse::from).toList());

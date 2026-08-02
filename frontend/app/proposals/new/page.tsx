@@ -1,5 +1,6 @@
 import { ProposalForm } from "@/components/proposals/proposal-form";
-import { ProposalHeader } from "@/components/proposals/proposal-header";
+import { PublicAppShell } from "@/components/design-system/public-app-shell";
+import { VStack } from "@astryxdesign/core/Stack";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -8,11 +9,10 @@ export const metadata: Metadata = {
 
 export default function NewProposalPage() {
   return (
-    <>
-      <ProposalHeader />
-      <main className="proposal-page narrow-proposal-page">
+    <PublicAppShell>
+      <VStack className="page-frame motion-reveal" maxWidth="48rem" paddingBlock={4}>
         <ProposalForm />
-      </main>
-    </>
+      </VStack>
+    </PublicAppShell>
   );
 }

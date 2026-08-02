@@ -1,5 +1,6 @@
 import { ProposalDetail } from "@/components/proposals/proposal-detail";
-import { ProposalHeader } from "@/components/proposals/proposal-header";
+import { PublicAppShell } from "@/components/design-system/public-app-shell";
+import { VStack } from "@astryxdesign/core/Stack";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -13,11 +14,10 @@ export default async function ProposalDetailPage({
 }) {
   const { publicId } = await params;
   return (
-    <>
-      <ProposalHeader />
-      <main className="proposal-page narrow-proposal-page">
+    <PublicAppShell>
+      <VStack className="page-frame motion-reveal" maxWidth="56rem" paddingBlock={4}>
         <ProposalDetail publicId={publicId} />
-      </main>
-    </>
+      </VStack>
+    </PublicAppShell>
   );
 }

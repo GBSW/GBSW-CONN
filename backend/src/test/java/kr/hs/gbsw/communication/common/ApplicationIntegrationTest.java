@@ -128,6 +128,7 @@ class ApplicationIntegrationTest {
         jdbcTemplate.update("DELETE FROM audit_logs");
         jdbcTemplate.update("DELETE FROM identity_reveal_records");
         jdbcTemplate.update("DELETE FROM proposal_visibility_history");
+        jdbcTemplate.update("DELETE FROM proposal_comments");
         jdbcTemplate.update("DELETE FROM moderation_votes");
         jdbcTemplate.update("DELETE FROM moderation_reviewer_snapshots");
         jdbcTemplate.update("DELETE FROM moderation_cases");
@@ -152,7 +153,7 @@ class ApplicationIntegrationTest {
 
     @Test
     void appliesFlywayAndCreatesJdbcSessionTablesOnEmptyMySql() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("6");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("7");
 
         Integer sessionTableCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'SPRING_SESSION'",
@@ -162,7 +163,7 @@ class ApplicationIntegrationTest {
     }
 
     @Test
-    void publicStatusReturnsTraceIdCsrfCookieAndSecurityHeaders() throws Exception {
+    void publicStatusReturnsTraceIdAndSecurityHeadersAndCsrfEndpointIssuesToken() throws Exception {
         HttpRequest request = HttpRequest.newBuilder(uri("/api/v1/system/status"))
                 .header("X-Request-Id", "integration_trace_123")
                 .GET()
@@ -172,14 +173,21 @@ class ApplicationIntegrationTest {
 
         assertThat(response.statusCode()).isEqualTo(200);
         assertThat(response.headers().firstValue("X-Request-Id")).contains("integration_trace_123");
-        assertThat(response.headers().allValues("Set-Cookie"))
-                .anyMatch(cookie -> cookie.startsWith("XSRF-TOKEN=") && cookie.contains("SameSite=Lax"));
         String contentSecurityPolicy = response.headers()
                 .firstValue("Content-Security-Policy")
                 .orElseThrow();
         assertThat(contentSecurityPolicy)
                 .contains("default-src 'self'", "object-src 'none'", "frame-ancestors 'none'");
         assertThat(response.body()).contains("\"status\":\"ok\"", "\"apiVersion\":\"v1\"");
+
+        HttpResponse<String> csrfResponse = httpClient.send(
+                HttpRequest.newBuilder(uri("/api/v1/auth/csrf")).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertThat(csrfResponse.statusCode()).isEqualTo(200);
+        JsonNode csrfBody = objectMapper.readTree(csrfResponse.body());
+        assertThat(csrfBody.path("headerName").asText()).isNotBlank();
+        assertThat(csrfBody.path("token").asText()).isNotBlank();
     }
 
     @Test
@@ -207,6 +215,11 @@ class ApplicationIntegrationTest {
                 .andExpect(jsonPath("$.paths['/api/v1/admin/offices/{office}/appointments'].post").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/proposals'].post").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/proposals'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/proposals/{publicId}'].put").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/proposals/{publicId}'].delete").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/proposals/{publicId}/comments'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/proposals/{publicId}/comments'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/proposals/{publicId}/comments/{commentPublicId}'].delete").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/proposals/{publicId}/support'].put").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/proposals/{publicId}/support'].delete").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/admin/proposals/{publicId}/assignments'].post").exists())
@@ -629,6 +642,132 @@ class ApplicationIntegrationTest {
         mockMvc.perform(put("/api/v1/proposals/{publicId}/support", publicId)
                         .cookie(teacherSession).with(csrf()))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void proposalAuthorCanUpdateAndSoftWithdrawBeforeFormalization() throws Exception {
+        createActiveAccount("edit.creator", "수정 작성자", "STUDENT", "creator secure passphrase");
+        createActiveAccount("edit.other", "다른 학생", "STUDENT", "other secure passphrase");
+        Cookie creatorSession = requireSessionCookie(login("edit.creator", "creator secure passphrase"));
+        Cookie otherSession = requireSessionCookie(login("edit.other", "other secure passphrase"));
+
+        MvcResult created = mockMvc.perform(post("/api/v1/proposals")
+                        .cookie(creatorSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"title":"수정 전 제목","content":"수정 전 내용","authorVisibility":"ANONYMOUS"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.viewerCanEdit").value(true))
+                .andReturn();
+        UUID publicId = UUID.fromString(
+                objectMapper.readTree(created.getResponse().getContentAsString()).get("publicId").asText());
+
+        mockMvc.perform(get("/api/v1/proposals/{publicId}", publicId).cookie(otherSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.viewerCanEdit").value(false));
+        mockMvc.perform(put("/api/v1/proposals/{publicId}", publicId)
+                        .cookie(otherSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"title":"권한 없는 수정","content":"수정되면 안 됩니다."}
+                                """))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(put("/api/v1/proposals/{publicId}", publicId)
+                        .cookie(creatorSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"title":"수정된 제목","content":"수정된 내용입니다."}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("수정된 제목"))
+                .andExpect(jsonPath("$.content").value("수정된 내용입니다."))
+                .andExpect(jsonPath("$.viewerCanEdit").value(true));
+
+        mockMvc.perform(delete("/api/v1/proposals/{publicId}", publicId)
+                        .cookie(otherSession).with(csrf()))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/v1/proposals/{publicId}", publicId)
+                        .cookie(creatorSession).with(csrf()))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(get("/api/v1/proposals/{publicId}", publicId).cookie(creatorSession))
+                .andExpect(status().isNotFound());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM proposals WHERE public_id = UUID_TO_BIN(?) AND withdrawn_at IS NOT NULL",
+                Integer.class, publicId.toString())).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM audit_logs
+                        WHERE event_type IN ('PROPOSAL_UPDATED', 'PROPOSAL_WITHDRAWN')
+                          AND actor_user_id IS NULL
+                        """, Integer.class)).isEqualTo(2);
+    }
+
+    @Test
+    void studentsCanCommentAndOnlyDeleteTheirOwnComments() throws Exception {
+        createActiveAccount("comment.creator", "댓글 제안자", "STUDENT", "creator secure passphrase");
+        createActiveAccount("comment.writer", "댓글 학생", "STUDENT", "writer secure passphrase");
+        createActiveAccount("comment.teacher", "댓글 교사", "TEACHER", "teacher secure passphrase");
+        Cookie creatorSession = requireSessionCookie(login("comment.creator", "creator secure passphrase"));
+        Cookie writerSession = requireSessionCookie(login("comment.writer", "writer secure passphrase"));
+        Cookie teacherSession = requireSessionCookie(login("comment.teacher", "teacher secure passphrase"));
+
+        MvcResult created = mockMvc.perform(post("/api/v1/proposals")
+                        .cookie(creatorSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"title":"댓글 검증 제안","content":"학생 댓글을 검증합니다.","authorVisibility":"NAMED"}
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID proposalPublicId = UUID.fromString(
+                objectMapper.readTree(created.getResponse().getContentAsString()).get("publicId").asText());
+
+        MvcResult commentCreated = mockMvc.perform(post(
+                                "/api/v1/proposals/{publicId}/comments", proposalPublicId)
+                        .cookie(writerSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"이 제안에 동의합니다.\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.authorDisplayName").value("댓글 학생"))
+                .andExpect(jsonPath("$.viewerCanDelete").value(true))
+                .andReturn();
+        UUID commentPublicId = UUID.fromString(
+                objectMapper.readTree(commentCreated.getResponse().getContentAsString()).get("publicId").asText());
+
+        mockMvc.perform(get("/api/v1/proposals/{publicId}/comments", proposalPublicId)
+                        .cookie(creatorSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].content").value("이 제안에 동의합니다."))
+                .andExpect(jsonPath("$[0].viewerCanDelete").value(false));
+        mockMvc.perform(get("/api/v1/proposals/{publicId}/comments", proposalPublicId)
+                        .cookie(teacherSession))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(post("/api/v1/proposals/{publicId}/comments", proposalPublicId)
+                        .cookie(teacherSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"교사 댓글 시도\"}"))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(delete(
+                                "/api/v1/proposals/{publicId}/comments/{commentPublicId}",
+                                proposalPublicId, commentPublicId)
+                        .cookie(creatorSession).with(csrf()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("PROPOSAL_COMMENT_NOT_FOUND"));
+        mockMvc.perform(delete(
+                                "/api/v1/proposals/{publicId}/comments/{commentPublicId}",
+                                proposalPublicId, commentPublicId)
+                        .cookie(writerSession).with(csrf()))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(get("/api/v1/proposals/{publicId}/comments", proposalPublicId)
+                        .cookie(creatorSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isEmpty());
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM proposal_comments WHERE deleted_at IS NOT NULL", Integer.class))
+                .isEqualTo(1);
     }
 
     @Test

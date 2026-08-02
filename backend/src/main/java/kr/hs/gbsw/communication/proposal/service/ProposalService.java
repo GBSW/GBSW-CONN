@@ -11,14 +11,18 @@ import kr.hs.gbsw.communication.proposal.domain.AuthorVisibility;
 import kr.hs.gbsw.communication.proposal.domain.EncryptedProposalIdentity;
 import kr.hs.gbsw.communication.proposal.domain.LockedProposal;
 import kr.hs.gbsw.communication.proposal.domain.ProposalFeedScope;
+import kr.hs.gbsw.communication.proposal.domain.ProposalCommentRecord;
 import kr.hs.gbsw.communication.proposal.domain.ProposalSort;
 import kr.hs.gbsw.communication.proposal.domain.ProposalStatusHistoryRecord;
 import kr.hs.gbsw.communication.proposal.domain.ProposalViewRecord;
 import kr.hs.gbsw.communication.proposal.domain.ProposalWorkflowStatus;
 import kr.hs.gbsw.communication.proposal.domain.SupportResult;
 import kr.hs.gbsw.communication.proposal.dto.response.ProposalDetailResponse;
+import kr.hs.gbsw.communication.proposal.dto.response.ProposalCommentResponse;
 import kr.hs.gbsw.communication.proposal.dto.response.ProposalPageResponse;
 import kr.hs.gbsw.communication.proposal.exception.ProposalNotFoundException;
+import kr.hs.gbsw.communication.proposal.exception.ProposalCommentNotFoundException;
+import kr.hs.gbsw.communication.proposal.exception.ProposalStateConflictException;
 import kr.hs.gbsw.communication.proposal.exception.StudentRoleRequiredException;
 import kr.hs.gbsw.communication.proposal.exception.SupportWithdrawalClosedException;
 import kr.hs.gbsw.communication.proposal.repository.ProposalRepository;
@@ -128,12 +132,105 @@ public class ProposalService {
                 .orElseThrow(ProposalNotFoundException::new);
         boolean viewerCanManage = viewer.authorities().contains("ROLE_TEACHER")
                 && workflowRepository.isCurrentAssignedTeacherByPublicId(publicId, viewer.userId(), now);
+        boolean viewerCanEdit = proposal.workflowStatus() == ProposalWorkflowStatus.GATHERING_SUPPORT
+                && viewer.authorities().contains("ROLE_STUDENT")
+                && isAuthor(viewer, publicId);
         return ProposalDetailResponse.from(
                 proposal,
                 repository.findStatusHistory(publicId),
                 workflowRepository.findOfficialResponses(publicId),
                 viewerCanManage,
+                viewerCanEdit,
                 properties.supportThreshold());
+    }
+
+    @Transactional
+    public ProposalDetailResponse update(
+            AuthPrincipal actor,
+            UUID publicId,
+            String title,
+            String content,
+            String traceId
+    ) {
+        Instant now = clock.instant();
+        requireStudentAuthority(actor);
+        requireActiveStudent(actor, now);
+        LockedProposal proposal = repository.lockVisibleByPublicId(publicId)
+                .orElseThrow(ProposalNotFoundException::new);
+        requireAuthor(actor, publicId);
+        requireGatheringSupport(proposal, "정식 안건이 된 제안은 수정할 수 없습니다.");
+        if (!repository.updateDraft(proposal.id(), title.strip(), content.strip(), now)) {
+            throw new ProposalStateConflictException("제안 상태가 변경되어 수정할 수 없습니다.");
+        }
+        auditLogRepository.appendForTarget(
+                null, "PROPOSAL_UPDATED", "PROPOSAL", publicId,
+                "SUCCESS", traceId, now);
+        return get(actor, publicId);
+    }
+
+    @Transactional
+    public void withdraw(AuthPrincipal actor, UUID publicId, String traceId) {
+        Instant now = clock.instant();
+        requireStudentAuthority(actor);
+        requireActiveStudent(actor, now);
+        LockedProposal proposal = repository.lockVisibleByPublicId(publicId)
+                .orElseThrow(ProposalNotFoundException::new);
+        requireAuthor(actor, publicId);
+        requireGatheringSupport(proposal, "정식 안건이 된 제안은 철회할 수 없습니다.");
+        if (!repository.withdrawDraft(proposal.id(), now)) {
+            throw new ProposalStateConflictException("제안 상태가 변경되어 철회할 수 없습니다.");
+        }
+        auditLogRepository.appendForTarget(
+                null, "PROPOSAL_WITHDRAWN", "PROPOSAL", publicId,
+                "SUCCESS", traceId, now);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ProposalCommentResponse> listComments(AuthPrincipal viewer, UUID publicId) {
+        get(viewer, publicId);
+        return repository.findComments(publicId, viewer.userId()).stream()
+                .map(ProposalCommentResponse::from)
+                .toList();
+    }
+
+    @Transactional
+    public ProposalCommentResponse createComment(
+            AuthPrincipal actor,
+            UUID publicId,
+            String content,
+            String traceId
+    ) {
+        Instant now = clock.instant();
+        requireStudentAuthority(actor);
+        requireActiveStudent(actor, now);
+        LockedProposal proposal = repository.lockVisibleByPublicId(publicId)
+                .orElseThrow(ProposalNotFoundException::new);
+        UUID commentPublicId = UUID.randomUUID();
+        ProposalCommentRecord comment = repository.insertComment(
+                proposal.id(), commentPublicId, actor.userId(), actor.displayName(), content.strip(), now);
+        auditLogRepository.appendForTarget(
+                actor.userId(), "PROPOSAL_COMMENT_CREATED", "PROPOSAL_COMMENT", commentPublicId,
+                "SUCCESS", traceId, now);
+        return ProposalCommentResponse.from(comment);
+    }
+
+    @Transactional
+    public void deleteComment(
+            AuthPrincipal actor,
+            UUID proposalPublicId,
+            UUID commentPublicId,
+            String traceId
+    ) {
+        Instant now = clock.instant();
+        requireStudentAuthority(actor);
+        requireActiveStudent(actor, now);
+        get(actor, proposalPublicId);
+        if (!repository.deleteComment(proposalPublicId, commentPublicId, actor.userId(), now)) {
+            throw new ProposalCommentNotFoundException();
+        }
+        auditLogRepository.appendForTarget(
+                actor.userId(), "PROPOSAL_COMMENT_DELETED", "PROPOSAL_COMMENT", commentPublicId,
+                "SUCCESS", traceId, now);
     }
 
     @Transactional
@@ -183,6 +280,24 @@ public class ProposalService {
 
     public int supportThreshold() {
         return properties.supportThreshold();
+    }
+
+    private boolean isAuthor(AuthPrincipal actor, UUID publicId) {
+        EncryptedProposalIdentity identity = repository.findEncryptedIdentity(publicId)
+                .orElseThrow(ProposalNotFoundException::new);
+        return identityCipher.decrypt(publicId, identity).equals(actor.userId());
+    }
+
+    private void requireAuthor(AuthPrincipal actor, UUID publicId) {
+        if (!isAuthor(actor, publicId)) {
+            throw new AccessDeniedException("Only the proposal author may change it");
+        }
+    }
+
+    private void requireGatheringSupport(LockedProposal proposal, String message) {
+        if (proposal.workflowStatus() != ProposalWorkflowStatus.GATHERING_SUPPORT) {
+            throw new ProposalStateConflictException(message);
+        }
     }
 
     private void requireStudentAuthority(AuthPrincipal principal) {

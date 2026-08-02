@@ -4,6 +4,34 @@
  */
 
 export interface paths {
+    "/api/v1/proposals/{publicId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 제안 상세
+         * @description 교사에게는 정식 안건 이후 제안만 존재하는 것으로 공개합니다.
+         */
+        get: operations["get"];
+        /**
+         * 본인 제안 수정
+         * @description 동의 모집 중인 제안의 작성자만 제목과 내용을 수정할 수 있습니다.
+         */
+        put: operations["update"];
+        post?: never;
+        /**
+         * 본인 제안 철회
+         * @description 동의 모집 중인 본인 제안을 공개 목록에서 철회하며 기록은 보존합니다.
+         */
+        delete: operations["withdraw"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/proposals/{publicId}/support": {
         parameters: {
             query?: never;
@@ -185,6 +213,30 @@ export interface paths {
         put?: never;
         /** 정식 안건 채택과 공식 답변 */
         post: operations["accept"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/proposals/{publicId}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 제안 댓글 목록
+         * @description 제안을 볼 수 있는 사용자가 학생 댓글을 시간순으로 조회합니다.
+         */
+        get: operations["listComments"];
+        put?: never;
+        /**
+         * 제안 댓글 작성
+         * @description 활성 학생이 공개 중인 제안에 댓글을 작성합니다.
+         */
+        post: operations["createComment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -595,26 +647,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/proposals/{publicId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 제안 상세
-         * @description 교사에게는 정식 안건 이후 제안만 존재하는 것으로 공개합니다.
-         */
-        get: operations["get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/moderation/reports": {
         parameters: {
             query?: never;
@@ -769,6 +801,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/proposals/{publicId}/comments/{commentPublicId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * 본인 댓글 삭제
+         * @description 댓글 작성자만 자신의 댓글을 공개 목록에서 삭제할 수 있습니다.
+         */
+        delete: operations["deleteComment"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -785,22 +837,10 @@ export interface components {
             traceId: string;
             fieldErrors?: components["schemas"]["FieldErrorResponse"][];
         };
-        /** @description 동의 명령 이후 서버가 다시 계산한 상태 */
-        SupportResponse: {
-            supported: boolean;
-            /** Format: int32 */
-            supportCount: number;
-            /** Format: int32 */
-            supportThreshold: number;
-            workflowStatus: string;
-            justFormalized: boolean;
-        };
-        /** @description 학생 공개 제안 작성 */
-        CreateProposalRequest: {
+        /** @description 동의 모집 중인 본인 제안 수정 */
+        UpdateProposalRequest: {
             title: string;
             content: string;
-            /** @enum {string} */
-            authorVisibility: "ANONYMOUS" | "NAMED";
         };
         /** @description 권한에 따라 공개되는 제안 상세 */
         ProposalDetailResponse: {
@@ -819,6 +859,8 @@ export interface components {
             viewerSupported: boolean;
             /** @description 현재 조회자가 내부 지정된 활성 담당 교사인지 여부 */
             viewerCanManage?: boolean;
+            /** @description 현재 조회자가 동의 모집 중인 제안의 작성자인지 여부 */
+            viewerCanEdit?: boolean;
             /** Format: date-time */
             formalizedAt?: string;
             /** Format: int32 */
@@ -847,6 +889,23 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
+        /** @description 동의 명령 이후 서버가 다시 계산한 상태 */
+        SupportResponse: {
+            supported: boolean;
+            /** Format: int32 */
+            supportCount: number;
+            /** Format: int32 */
+            supportThreshold: number;
+            workflowStatus: string;
+            justFormalized: boolean;
+        };
+        /** @description 학생 공개 제안 작성 */
+        CreateProposalRequest: {
+            title: string;
+            content: string;
+            /** @enum {string} */
+            authorVisibility: "ANONYMOUS" | "NAMED";
+        };
         ProposalTransitionReasonRequest: {
             reason: string;
         };
@@ -866,6 +925,20 @@ export interface components {
             content: string;
             decisionReason: string;
             followUpPlan?: string;
+        };
+        /** @description 학생 제안 댓글 작성 */
+        CreateProposalCommentRequest: {
+            content: string;
+        };
+        /** @description 제안 댓글 */
+        ProposalCommentResponse: {
+            /** Format: uuid */
+            publicId: string;
+            authorDisplayName: string;
+            content: string;
+            viewerCanDelete: boolean;
+            /** Format: date-time */
+            createdAt: string;
         };
         CreateModerationCaseRequest: {
             /** @enum {string} */
@@ -1122,9 +1195,9 @@ export interface components {
             existingCaseTypes?: string[];
         };
         CsrfToken: {
-            headerName?: string;
             parameterName?: string;
             token?: string;
+            headerName?: string;
         };
         /** @description 상태 변경 요청에 사용할 CSRF 토큰 */
         CsrfTokenResponse: {
@@ -1215,6 +1288,74 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                publicId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ProposalDetailResponse"];
+                };
+            };
+        };
+    };
+    update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                publicId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProposalRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ProposalDetailResponse"];
+                };
+            };
+        };
+    };
+    withdraw: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                publicId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     support: {
         parameters: {
             query?: never;
@@ -1513,6 +1654,54 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ProposalWorkflowResponse"];
+                };
+            };
+        };
+    };
+    listComments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                publicId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ProposalCommentResponse"][];
+                };
+            };
+        };
+    };
+    createComment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                publicId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateProposalCommentRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ProposalCommentResponse"];
                 };
             };
         };
@@ -2060,28 +2249,6 @@ export interface operations {
             };
         };
     };
-    get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                publicId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ProposalDetailResponse"];
-                };
-            };
-        };
-    };
     reports: {
         parameters: {
             query?: {
@@ -2255,6 +2422,27 @@ export interface operations {
                 content: {
                     "*/*": components["schemas"]["EligibleProposalTeacherResponse"][];
                 };
+            };
+        };
+    };
+    deleteComment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                publicId: string;
+                commentPublicId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

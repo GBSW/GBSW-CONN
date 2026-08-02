@@ -2,6 +2,11 @@
 
 import type { components } from "@/lib/api-schema";
 import { apiPost, errorMessage } from "@/lib/api-client";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { FormLayout } from "@astryxdesign/core/FormLayout";
+import { VStack } from "@astryxdesign/core/Stack";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
@@ -9,6 +14,10 @@ type PasswordResetRequest = components["schemas"]["PasswordResetRequest"];
 
 export function PasswordResetForm() {
   const router = useRouter();
+  const [loginId, setLoginId] = useState("");
+  const [resetCode, setResetCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -16,13 +25,8 @@ export function PasswordResetForm() {
     event.preventDefault();
     setSubmitting(true);
     setError(null);
-    const form = new FormData(event.currentTarget);
-    const request: PasswordResetRequest = {
-      loginId: String(form.get("loginId") ?? ""),
-      resetCode: String(form.get("resetCode") ?? ""),
-      newPassword: String(form.get("newPassword") ?? ""),
-    };
-    if (request.newPassword !== String(form.get("passwordConfirmation") ?? "")) {
+    const request: PasswordResetRequest = { loginId, resetCode, newPassword };
+    if (newPassword !== passwordConfirmation) {
       setError("비밀번호 확인이 일치하지 않습니다.");
       setSubmitting(false);
       return;
@@ -38,41 +42,18 @@ export function PasswordResetForm() {
   }
 
   return (
-    <form className="auth-form" onSubmit={(event) => void submit(event)}>
-      <div className="field">
-        <label htmlFor="reset-login-id">로그인 ID</label>
-        <input id="reset-login-id" name="loginId" autoComplete="username" required />
-      </div>
-      <div className="field">
-        <label htmlFor="reset-code">재설정 코드</label>
-        <input id="reset-code" name="resetCode" autoComplete="one-time-code" spellCheck={false} required />
-      </div>
-      <div className="field">
-        <label htmlFor="reset-password">새 비밀번호</label>
-        <input id="reset-password" name="newPassword" type="password" autoComplete="new-password" minLength={12} required />
-      </div>
-      <div className="field">
-        <label htmlFor="reset-password-confirmation">새 비밀번호 확인</label>
-        <input
-          id="reset-password-confirmation"
-          name="passwordConfirmation"
-          type="password"
-          autoComplete="new-password"
-          minLength={12}
-          required
-        />
-      </div>
-      {error ? (
-        <p className="form-error" role="alert">
-          {error}
-        </p>
-      ) : null}
-      <button className="primary-button" type="submit" disabled={submitting}>
-        {submitting ? "변경 중…" : "비밀번호 변경"}
-      </button>
-      <div className="form-links">
-        <a href="/login">로그인으로 돌아가기</a>
-      </div>
+    <form onSubmit={(event) => void submit(event)}>
+      <VStack gap={4}>
+        <FormLayout>
+          <TextInput label="로그인 ID" htmlName="loginId" value={loginId} onChange={setLoginId} isRequired width="100%" />
+          <TextInput label="재설정 코드" htmlName="resetCode" value={resetCode} onChange={setResetCode} isRequired width="100%" />
+          <TextInput label="새 비밀번호" htmlName="newPassword" type="password" value={newPassword} onChange={setNewPassword} isRequired width="100%" />
+          <TextInput label="새 비밀번호 확인" htmlName="passwordConfirmation" type="password" value={passwordConfirmation} onChange={setPasswordConfirmation} isRequired width="100%" />
+        </FormLayout>
+        {error ? <Banner status="error" title="비밀번호를 변경할 수 없습니다" description={error} /> : null}
+        <Button label="비밀번호 변경" type="submit" variant="primary" width="100%" isLoading={submitting} isDisabled={submitting} />
+        <Button label="로그인으로 돌아가기" href="/login" variant="ghost" size="sm" />
+      </VStack>
     </form>
   );
 }

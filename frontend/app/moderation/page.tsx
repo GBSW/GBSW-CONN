@@ -1,5 +1,6 @@
 import { ModerationConsole } from "@/components/moderation/moderation-console";
-import { ProposalHeader } from "@/components/proposals/proposal-header";
+import { StaffAppShell } from "@/components/design-system/staff-app-shell";
+import { VStack } from "@astryxdesign/core/Stack";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -8,11 +9,10 @@ export const metadata: Metadata = {
 
 export default function ModerationPage() {
   return (
-    <>
-      <ProposalHeader />
-      <main className="moderation-page">
+    <StaffAppShell>
+      <VStack className="page-frame motion-reveal" paddingBlock={4}>
         <ModerationConsole />
-      </main>
-    </>
+      </VStack>
+    </StaffAppShell>
   );
 }

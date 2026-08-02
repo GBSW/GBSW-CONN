@@ -17,9 +17,13 @@ import kr.hs.gbsw.communication.moderation.service.ContentReportService;
 import kr.hs.gbsw.communication.proposal.domain.ProposalFeedScope;
 import kr.hs.gbsw.communication.proposal.domain.ProposalSort;
 import kr.hs.gbsw.communication.proposal.dto.request.CreateProposalRequest;
+import kr.hs.gbsw.communication.proposal.dto.request.CreateProposalCommentRequest;
+import kr.hs.gbsw.communication.proposal.dto.request.UpdateProposalRequest;
 import kr.hs.gbsw.communication.proposal.dto.request.OfficialResponseRequest;
 import kr.hs.gbsw.communication.proposal.dto.request.ProposalTransitionReasonRequest;
 import kr.hs.gbsw.communication.proposal.dto.response.ProposalDetailResponse;
+import kr.hs.gbsw.communication.proposal.dto.response.ProposalCommentResponse;
+import java.util.List;
 import kr.hs.gbsw.communication.proposal.dto.response.ProposalPageResponse;
 import kr.hs.gbsw.communication.proposal.dto.response.SupportResponse;
 import kr.hs.gbsw.communication.proposal.dto.response.ProposalWorkflowResponse;
@@ -95,6 +99,62 @@ public class ProposalController {
             @PathVariable UUID publicId
     ) {
         return service.get(viewer, publicId);
+    }
+
+    @PutMapping("/{publicId}")
+    @PreAuthorize("hasRole('STUDENT')")
+    @Operation(summary = "본인 제안 수정", description = "동의 모집 중인 제안의 작성자만 제목과 내용을 수정할 수 있습니다.")
+    public ProposalDetailResponse update(
+            @AuthenticationPrincipal AuthPrincipal actor,
+            @PathVariable UUID publicId,
+            @Valid @RequestBody UpdateProposalRequest request
+    ) {
+        return service.update(actor, publicId, request.title(), request.content(), traceId());
+    }
+
+    @DeleteMapping("/{publicId}")
+    @PreAuthorize("hasRole('STUDENT')")
+    @Operation(summary = "본인 제안 철회", description = "동의 모집 중인 본인 제안을 공개 목록에서 철회하며 기록은 보존합니다.")
+    public ResponseEntity<Void> withdraw(
+            @AuthenticationPrincipal AuthPrincipal actor,
+            @PathVariable UUID publicId
+    ) {
+        service.withdraw(actor, publicId, traceId());
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/{publicId}/comments")
+    @PreAuthorize("hasAnyRole('STUDENT','TEACHER')")
+    @Operation(summary = "제안 댓글 목록", description = "제안을 볼 수 있는 사용자가 학생 댓글을 시간순으로 조회합니다.")
+    public List<ProposalCommentResponse> listComments(
+            @AuthenticationPrincipal AuthPrincipal viewer,
+            @PathVariable UUID publicId
+    ) {
+        return service.listComments(viewer, publicId);
+    }
+
+    @PostMapping("/{publicId}/comments")
+    @PreAuthorize("hasRole('STUDENT')")
+    @Operation(summary = "제안 댓글 작성", description = "활성 학생이 공개 중인 제안에 댓글을 작성합니다.")
+    public ResponseEntity<ProposalCommentResponse> createComment(
+            @AuthenticationPrincipal AuthPrincipal actor,
+            @PathVariable UUID publicId,
+            @Valid @RequestBody CreateProposalCommentRequest request
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(
+                service.createComment(actor, publicId, request.content(), traceId()));
+    }
+
+    @DeleteMapping("/{publicId}/comments/{commentPublicId}")
+    @PreAuthorize("hasRole('STUDENT')")
+    @Operation(summary = "본인 댓글 삭제", description = "댓글 작성자만 자신의 댓글을 공개 목록에서 삭제할 수 있습니다.")
+    public ResponseEntity<Void> deleteComment(
+            @AuthenticationPrincipal AuthPrincipal actor,
+            @PathVariable UUID publicId,
+            @PathVariable UUID commentPublicId
+    ) {
+        service.deleteComment(actor, publicId, commentPublicId, traceId());
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{publicId}/reports")
