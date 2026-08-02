@@ -1,0 +1,82 @@
+spring:
+  application:
+    name: school-communication-backend
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/school_communication?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC}
+    username: ${DB_USERNAME:school_app}
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:12}
+      minimum-idle: ${DB_POOL_MIN_IDLE:2}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  session:
+    jdbc:
+      initialize-schema: never
+    timeout: ${SESSION_TIMEOUT:30m}
+
+server:
+  port: ${BACKEND_PORT:8080}
+  forward-headers-strategy: native
+  servlet:
+    session:
+      cookie:
+        name: SESSION
+        http-only: true
+        secure: ${SESSION_COOKIE_SECURE:false}
+        same-site: lax
+  max-http-request-header-size: 16KB
+
+springdoc:
+  api-docs:
+    enabled: ${OPENAPI_ENABLED:true}
+  swagger-ui:
+    enabled: ${SWAGGER_UI_ENABLED:true}
+    path: /swagger-ui.html
+    csrf:
+      enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+
+app:
+  security:
+    cookie:
+      secure: ${SESSION_COOKIE_SECURE:false}
+      same-site: Lax
+    rate-limit:
+      login-failures-before-delay: ${LOGIN_FAILURES_BEFORE_DELAY:5}
+      maximum-delay-seconds: ${LOGIN_MAXIMUM_DELAY_SECONDS:300}
+      general-requests-per-minute: ${GENERAL_REQUESTS_PER_MINUTE:120}
+    credentials:
+      activation-code-ttl: ${ACTIVATION_CODE_TTL:24h}
+      password-reset-code-ttl: ${PASSWORD_RESET_CODE_TTL:30m}
+      reauthentication-ttl: ${REAUTHENTICATION_TTL:10m}
+      minimum-password-length: ${MINIMUM_PASSWORD_LENGTH:12}
+      maximum-password-length: ${MAXIMUM_PASSWORD_LENGTH:128}
+    secrets:
+      throttle-fingerprint: ${THROTTLE_FINGERPRINT_SECRET}
+  proposal:
+    support-threshold: ${PROPOSAL_SUPPORT_THRESHOLD:50}
+  identity-vault:
+    key-base64: ${PROPOSAL_IDENTITY_KEY_BASE64}
+    key-version: ${PROPOSAL_IDENTITY_KEY_VERSION:1}
+
+logging:
+  pattern:
+    level: "%5p [traceId=%X{traceId:-}]"

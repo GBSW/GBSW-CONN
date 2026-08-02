@@ -1,0 +1,24 @@
+name: 기능 제안
+description: 사용자 문제와 필요한 정책을 제안합니다.
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 해결할 사용자 문제
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 제안하는 동작
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: 권한·개인정보·익명성 영향
+      description: 영향이 없다고 판단했다면 이유를 적어 주세요.
+    validations:
+      required: true

@@ -1,22 +1,12 @@
-# CODEOWNERS — 코드 검토 책임자 지정
+# Required owners are intentionally not guessed.
+# Before the repository is made public, replace this comment-only file with real,
+# verified organization teams for at least the following paths:
 #
-# 형식: <패턴> <GitHub 계정 또는 팀>
-# 자세한 문법: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+# /backend/src/main/java/**/auth/           @organization/security-team
+# /backend/src/main/java/**/identity/       @organization/security-team
+# /backend/src/main/java/**/moderation/     @organization/security-team
+# /backend/src/main/resources/db/migration/ @organization/database-team
+# /.github/                                 @organization/maintainers
+# /SECURITY.md                              @organization/security-team
 #
-# ──────────────────────────────────────────────────────────────────────────────
-# TODO: 아래 @GITHUB_USERNAME 을 실제 GitHub 계정으로 교체하십시오.
-#       계정이 확정되지 않아 임의로 채우지 않았습니다.
-# ──────────────────────────────────────────────────────────────────────────────
-
-# GitHub 저장소 설정 파일 전체
-/.github/   @GITHUB_USERNAME
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 다음 경로는 백엔드 코드 구조가 확정된 뒤 추가합니다.
-# (3단계 — 인증과 권한 구현 시점)
-#
-# /backend/src/main/java/**/auth/         @GITHUB_USERNAME
-# /backend/src/main/java/**/identity/     @GITHUB_USERNAME
-# /backend/src/main/java/**/moderation/   @GITHUB_USERNAME
-# /backend/src/main/resources/db/migration/  @GITHUB_USERNAME
-# ──────────────────────────────────────────────────────────────────────────────
+# See docs/decisions/open-questions.md D-003.
