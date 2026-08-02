@@ -1,5 +1,6 @@
 import { ModerationCaseDetail } from "@/components/moderation/moderation-case-detail";
-import { ProposalHeader } from "@/components/proposals/proposal-header";
+import { StaffAppShell } from "@/components/design-system/staff-app-shell";
+import { VStack } from "@astryxdesign/core/Stack";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -13,11 +14,10 @@ export default async function ModerationCasePage({
 }) {
   const { publicId } = await params;
   return (
-    <>
-      <ProposalHeader />
-      <main className="moderation-page narrow-moderation-page">
+    <StaffAppShell>
+      <VStack className="page-frame motion-reveal" maxWidth="56rem" paddingBlock={4}>
         <ModerationCaseDetail publicId={publicId} />
-      </main>
-    </>
+      </VStack>
+    </StaffAppShell>
   );
 }

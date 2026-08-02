@@ -1,5 +1,9 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import "@astryxdesign/core/reset.css";
+import "@astryxdesign/core/astryx.css";
+import "@astryxdesign/theme-neutral/theme.css";
+import { AstryxProvider } from "@/components/design-system/astryx-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -10,7 +14,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="ko">
-      <body>{children}</body>
+      <body data-design-contract="astryx-neutral-topnav-row-feed-system-mode">
+        {/* Design contract: A stryx Neutral, system light/dark, public TopNav, staff SideNav, dense record rows. */}
+        <AstryxProvider>{children}</AstryxProvider>
+      </body>
     </html>
   );
 }

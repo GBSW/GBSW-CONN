@@ -1,0 +1,6 @@
+{
+  "approved": true,
+  "source": "native image generation",
+  "prompt": "A desktop product UI for a Korean school community proposal platform. Restrained neutral design system, quiet warm surfaces, top navigation with text wordmark, large proposal feed title, compact filters, dense row-based proposal list with status, support count and progress, no decorative imagery, no gradients, no bento grid.",
+  "notes": "User approved composition A. The image is a directional north-star, not a pixel specification. Korean product copy, semantic structure, accessibility, and responsive reflow take precedence."
+}

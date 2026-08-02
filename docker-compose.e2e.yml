@@ -1,0 +1,22 @@
+services:
+  mysql:
+    image: mysql:8.4.10
+    environment:
+      MYSQL_DATABASE: school_communication_e2e
+      MYSQL_USER: school_e2e
+      MYSQL_PASSWORD: ${E2E_MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${E2E_MYSQL_ROOT_PASSWORD}
+      TZ: UTC
+    ports:
+      - "127.0.0.1:${E2E_MYSQL_PORT}:3306"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uschool_e2e -p$$MYSQL_PASSWORD --silent"]
+      interval: 2s
+      timeout: 5s
+      retries: 45
+      start_period: 10s
+    tmpfs:
+      - /var/lib/mysql

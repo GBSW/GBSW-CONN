@@ -2,7 +2,9 @@
 
 import type { components } from "@/lib/api-schema";
 import { apiGet, apiPost } from "@/lib/api-client";
-import Link from "next/link";
+import { Button } from "@astryxdesign/core/Button";
+import { HStack } from "@astryxdesign/core/Stack";
+import { Text } from "@astryxdesign/core/Text";
 import { useEffect, useState } from "react";
 
 type CurrentUser = components["schemas"]["CurrentUserResponse"];
@@ -36,7 +38,7 @@ export function AuthStatus() {
   }
 
   if (!loaded) {
-    return <span className="auth-status-placeholder" aria-label="로그인 상태 확인 중" />;
+    return <Text type="supporting">로그인 확인 중</Text>;
   }
   if (user) {
     const reviewer = user.offices.some((office) => [
@@ -45,21 +47,20 @@ export function AuthStatus() {
       "STUDENT_COUNCIL_VICE_PRESIDENT",
     ].includes(office));
     return (
-      <div className="auth-status">
-        <span>{user.displayName}</span>
-        {user.roles.some((role) => role === "STUDENT" || role === "TEACHER") ? <Link href="/proposals">제안 보기</Link> : null}
-        {reviewer ? <Link href="/moderation">보호 심의</Link> : null}
-        {user.roles.includes("SUPER_ADMIN") ? <Link href="/admin">계정 관리</Link> : null}
-        <button className="link-button" type="button" onClick={() => void logout()}>
-          로그아웃
-        </button>
-      </div>
+      <HStack gap={1} vAlign="center" wrap="wrap">
+        <Text type="supporting" weight="medium">{user.displayName}</Text>
+        <Button label="대시보드" href="/dashboard" variant="ghost" size="sm" />
+        {user.roles.includes("STUDENT") ? <Button label="공개 제안 작성" href="/proposals/new" variant="primary" size="sm" /> : null}
+        {reviewer ? <Button label="보호 심의" href="/moderation" variant="ghost" size="sm" /> : null}
+        {user.roles.includes("SUPER_ADMIN") ? <Button label="계정 관리" href="/admin" variant="ghost" size="sm" /> : null}
+        <Button label="로그아웃" variant="ghost" size="sm" clickAction={logout} />
+      </HStack>
     );
   }
   return (
-    <div className="auth-status">
-      <Link href="/activate">계정 활성화</Link>
-      <Link href="/login">로그인</Link>
-    </div>
+    <HStack gap={1} vAlign="center">
+      <Button label="계정 활성화" href="/activate" variant="ghost" size="sm" />
+      <Button label="로그인" href="/login" variant="secondary" size="sm" />
+    </HStack>
   );
 }

@@ -12,6 +12,7 @@ import kr.hs.gbsw.communication.proposal.domain.AuthorVisibility;
 import kr.hs.gbsw.communication.proposal.domain.EncryptedProposalIdentity;
 import kr.hs.gbsw.communication.proposal.domain.LockedProposal;
 import kr.hs.gbsw.communication.proposal.domain.ProposalFeedScope;
+import kr.hs.gbsw.communication.proposal.domain.ProposalCommentRecord;
 import kr.hs.gbsw.communication.proposal.domain.ProposalSort;
 import kr.hs.gbsw.communication.proposal.domain.ProposalStatusHistoryRecord;
 import kr.hs.gbsw.communication.proposal.domain.ProposalViewRecord;
@@ -150,11 +151,115 @@ public class ProposalRepository {
                         SELECT BIN_TO_UUID(id) AS id, BIN_TO_UUID(public_id) AS public_id,
                                workflow_status, visibility_status
                         FROM proposals
-                        WHERE public_id = UUID_TO_BIN(?) AND visibility_status = 'VISIBLE'
+                        WHERE public_id = UUID_TO_BIN(?)
+                          AND visibility_status = 'VISIBLE'
+                          AND withdrawn_at IS NULL
                         FOR UPDATE
                         """,
                 this::mapLockedProposal,
                 publicId.toString()).stream().findFirst();
+    }
+
+    public Optional<EncryptedProposalIdentity> findEncryptedIdentity(UUID publicId) {
+        return jdbcTemplate.query("""
+                        SELECT identity.encrypted_user_id, identity.nonce, identity.key_version
+                        FROM proposal_identities identity
+                        JOIN proposals proposal ON proposal.id = identity.proposal_id
+                        WHERE proposal.public_id = UUID_TO_BIN(?)
+                        """,
+                (resultSet, rowNumber) -> new EncryptedProposalIdentity(
+                        resultSet.getBytes("encrypted_user_id"),
+                        resultSet.getBytes("nonce"),
+                        resultSet.getInt("key_version")),
+                publicId.toString()).stream().findFirst();
+    }
+
+    public boolean updateDraft(UUID proposalId, String title, String content, Instant now) {
+        return jdbcTemplate.update("""
+                        UPDATE proposals
+                        SET title = ?, content = ?, updated_at = ?
+                        WHERE id = UUID_TO_BIN(?)
+                          AND workflow_status = 'GATHERING_SUPPORT'
+                          AND visibility_status = 'VISIBLE'
+                          AND withdrawn_at IS NULL
+                        """,
+                title, content, Timestamp.from(now), proposalId.toString()) == 1;
+    }
+
+    public boolean withdrawDraft(UUID proposalId, Instant now) {
+        return jdbcTemplate.update("""
+                        UPDATE proposals
+                        SET withdrawn_at = ?, updated_at = ?
+                        WHERE id = UUID_TO_BIN(?)
+                          AND workflow_status = 'GATHERING_SUPPORT'
+                          AND visibility_status = 'VISIBLE'
+                          AND withdrawn_at IS NULL
+                        """,
+                Timestamp.from(now), Timestamp.from(now), proposalId.toString()) == 1;
+    }
+
+    public ProposalCommentRecord insertComment(
+            UUID proposalId,
+            UUID commentPublicId,
+            UUID authorUserId,
+            String authorDisplayName,
+            String content,
+            Instant now
+    ) {
+        UUID id = UUID.randomUUID();
+        jdbcTemplate.update("""
+                        INSERT INTO proposal_comments (
+                            id, public_id, proposal_id, author_user_id, content, created_at
+                        ) VALUES (UUID_TO_BIN(?), UUID_TO_BIN(?), UUID_TO_BIN(?), UUID_TO_BIN(?), ?, ?)
+                        """,
+                id.toString(), commentPublicId.toString(), proposalId.toString(),
+                authorUserId.toString(), content, Timestamp.from(now));
+        return new ProposalCommentRecord(
+                commentPublicId, authorDisplayName, content, true, now);
+    }
+
+    public List<ProposalCommentRecord> findComments(UUID proposalPublicId, UUID viewerUserId) {
+        return jdbcTemplate.query("""
+                        SELECT BIN_TO_UUID(comment.public_id) AS public_id,
+                               author.display_name AS author_display_name,
+                               comment.content,
+                               comment.author_user_id = UUID_TO_BIN(?) AS viewer_can_delete,
+                               comment.created_at
+                        FROM proposal_comments comment
+                        JOIN proposals proposal ON proposal.id = comment.proposal_id
+                        JOIN users author ON author.id = comment.author_user_id
+                        WHERE proposal.public_id = UUID_TO_BIN(?)
+                          AND comment.deleted_at IS NULL
+                        ORDER BY comment.created_at, comment.id
+                        """,
+                (resultSet, rowNumber) -> new ProposalCommentRecord(
+                        UUID.fromString(resultSet.getString("public_id")),
+                        resultSet.getString("author_display_name"),
+                        resultSet.getString("content"),
+                        resultSet.getBoolean("viewer_can_delete"),
+                        resultSet.getTimestamp("created_at").toInstant()),
+                viewerUserId.toString(), proposalPublicId.toString());
+    }
+
+    public boolean deleteComment(
+            UUID proposalPublicId,
+            UUID commentPublicId,
+            UUID authorUserId,
+            Instant now
+    ) {
+        return jdbcTemplate.update("""
+                        UPDATE proposal_comments comment
+                        JOIN proposals proposal ON proposal.id = comment.proposal_id
+                        SET comment.deleted_at = ?
+                        WHERE proposal.public_id = UUID_TO_BIN(?)
+                          AND comment.public_id = UUID_TO_BIN(?)
+                          AND comment.author_user_id = UUID_TO_BIN(?)
+                          AND comment.deleted_at IS NULL
+                          AND proposal.visibility_status = 'VISIBLE'
+                          AND proposal.withdrawn_at IS NULL
+                        """,
+                Timestamp.from(now), proposalPublicId.toString(), commentPublicId.toString(),
+                authorUserId.toString()) == 1;
     }
 
     public boolean formalize(UUID proposalId, int supportCount, Instant now) {
@@ -283,6 +388,7 @@ public class ProposalRepository {
                         FROM proposals p
                         WHERE p.public_id = UUID_TO_BIN(?)
                           AND p.visibility_status = 'VISIBLE'
+                          AND p.withdrawn_at IS NULL
                         """ + accessPredicate,
                 this::mapProposalView,
                 Timestamp.from(now), Timestamp.from(now),
@@ -311,6 +417,7 @@ public class ProposalRepository {
         List<String> predicates = new ArrayList<>();
         List<Object> parameters = new ArrayList<>();
         predicates.add("p.visibility_status = 'VISIBLE'");
+        predicates.add("p.withdrawn_at IS NULL");
         if (!studentView || scope == ProposalFeedScope.FORMAL_AGENDA) {
             predicates.add("p.workflow_status <> 'GATHERING_SUPPORT'");
         }

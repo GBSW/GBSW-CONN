@@ -2,50 +2,53 @@
 
 import type { components } from "@/lib/api-schema";
 import { ApiRequestError, apiDelete, apiGet, apiPut, errorMessage } from "@/lib/api-client";
-import Link from "next/link";
-import { useEffect, useState } from "react";
 import { ProposalWorkflowPanel } from "@/components/proposals/proposal-workflow-panel";
 import { ProposalReportForm } from "@/components/proposals/proposal-report-form";
+import { ProposalComments } from "@/components/proposals/proposal-comments";
+import { AlertDialog } from "@astryxdesign/core/AlertDialog";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { Heading } from "@astryxdesign/core/Heading";
+import { List, ListItem } from "@astryxdesign/core/List";
+import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
+import { ProgressBar } from "@astryxdesign/core/ProgressBar";
+import { Section } from "@astryxdesign/core/Section";
+import { Spinner } from "@astryxdesign/core/Spinner";
+import { HStack, VStack } from "@astryxdesign/core/Stack";
+import { StatusDot } from "@astryxdesign/core/StatusDot";
+import { Text } from "@astryxdesign/core/Text";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type CurrentUser = components["schemas"]["CurrentUserResponse"];
 type ProposalDetailResponse = components["schemas"]["ProposalDetailResponse"];
 type SupportResponse = components["schemas"]["SupportResponse"];
 
-const dateTimeFormatter = new Intl.DateTimeFormat("ko-KR", {
-  timeZone: "Asia/Seoul",
-  dateStyle: "medium",
-  timeStyle: "short",
-});
-
-function formatDateTime(value: string): string {
-  return dateTimeFormatter.format(new Date(value));
-}
-
+const dateTimeFormatter = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", dateStyle: "medium", timeStyle: "short" });
 const statusLabels: Record<string, string> = {
-  GATHERING_SUPPORT: "동의 모집 중",
-  FORMAL_AGENDA: "정식 안건",
-  UNDER_REVIEW: "검토 중",
-  ACCEPTED: "채택",
-  ON_HOLD: "보류",
-  REJECTED: "반려",
-  IN_PROGRESS: "실행 중",
-  COMPLETED: "완료",
+  GATHERING_SUPPORT: "동의 모집 중", FORMAL_AGENDA: "정식 안건", UNDER_REVIEW: "검토 중", ACCEPTED: "채택",
+  ON_HOLD: "보류", REJECTED: "반려", IN_PROGRESS: "실행 중", COMPLETED: "완료",
+};
+const statusVariants: Record<string, "accent" | "success" | "warning" | "error" | "neutral"> = {
+  GATHERING_SUPPORT: "accent", FORMAL_AGENDA: "success", UNDER_REVIEW: "accent", ACCEPTED: "success",
+  ON_HOLD: "warning", REJECTED: "error", IN_PROGRESS: "accent", COMPLETED: "success",
 };
 
 export function ProposalDetail({ publicId }: { publicId: string }) {
+  const router = useRouter();
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [proposal, setProposal] = useState<ProposalDetailResponse | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "signed-out" | "not-found" | "error">("loading");
   const [actionPending, setActionPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [withdrawPending, setWithdrawPending] = useState(false);
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      apiGet<CurrentUser>("/api/v1/auth/me"),
-      apiGet<ProposalDetailResponse>(`/api/v1/proposals/${publicId}`),
-    ])
+    Promise.all([apiGet<CurrentUser>("/api/v1/auth/me"), apiGet<ProposalDetailResponse>(`/api/v1/proposals/${publicId}`)])
       .then(([currentUser, response]) => {
         if (!active) return;
         setUser(currentUser);
@@ -54,18 +57,11 @@ export function ProposalDetail({ publicId }: { publicId: string }) {
       })
       .catch((caught: unknown) => {
         if (!active) return;
-        if (caught instanceof ApiRequestError && caught.code === "PROPOSAL_NOT_FOUND") {
-          setState("not-found");
-        } else if (caught instanceof ApiRequestError
-          && ["AUTHENTICATION_REQUIRED", "SESSION_INVALIDATED"].includes(caught.code)) {
-          setState("signed-out");
-        } else {
-          setState("error");
-        }
+        if (caught instanceof ApiRequestError && caught.code === "PROPOSAL_NOT_FOUND") setState("not-found");
+        else if (caught instanceof ApiRequestError && ["AUTHENTICATION_REQUIRED", "SESSION_INVALIDATED"].includes(caught.code)) setState("signed-out");
+        else setState("error");
       });
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [publicId]);
 
   async function changeSupport() {
@@ -78,16 +74,11 @@ export function ProposalDetail({ publicId }: { publicId: string }) {
         ? await apiDelete<SupportResponse>(`/api/v1/proposals/${publicId}/support`)
         : await apiPut<SupportResponse>(`/api/v1/proposals/${publicId}/support`);
       setProposal((current) => current ? {
-        ...current,
-        viewerSupported: result.supported,
-        supportCount: result.supportCount,
-        workflowStatus: result.workflowStatus,
+        ...current, viewerSupported: result.supported, supportCount: result.supportCount, workflowStatus: result.workflowStatus,
         formalizedSupportCount: result.justFormalized ? result.supportCount : current.formalizedSupportCount,
         formalizedAt: result.justFormalized ? new Date().toISOString() : current.formalizedAt,
       } : current);
-      setNotice(result.justFormalized
-        ? "50명의 동의에 도달해 정식 안건으로 승격되었습니다."
-        : result.supported ? "이 제안에 동의했습니다." : "동의를 철회했습니다.");
+      setNotice(result.justFormalized ? "50명의 동의에 도달해 정식 안건으로 승격되었습니다." : result.supported ? "이 제안에 동의했습니다." : "동의를 철회했습니다.");
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -95,108 +86,134 @@ export function ProposalDetail({ publicId }: { publicId: string }) {
     }
   }
 
-  if (state === "loading") return <p className="proposal-state" role="status">제안을 불러오고 있습니다…</p>;
-  if (state === "signed-out") return <section className="proposal-state"><h1>로그인이 필요합니다</h1><Link className="primary-link" href="/login">로그인</Link></section>;
-  if (state === "not-found") return <section className="proposal-state"><h1>제안을 찾을 수 없습니다</h1><p>삭제되었거나 현재 계정에 공개되지 않은 제안입니다.</p><Link href="/proposals">제안 목록으로</Link></section>;
-  if (state === "error" || !proposal) return <p className="form-error" role="alert">제안을 불러오지 못했습니다.</p>;
+  async function withdrawProposal() {
+    setWithdrawPending(true);
+    setError(null);
+    try {
+      await apiDelete<void>(`/api/v1/proposals/${publicId}`);
+      setWithdrawOpen(false);
+      router.replace("/proposals");
+      router.refresh();
+    } catch (caught) {
+      setError(errorMessage(caught));
+      setWithdrawOpen(false);
+      setWithdrawPending(false);
+    }
+  }
+
+  if (state === "loading") return <Spinner size="lg" label="제안을 불러오고 있습니다…" />;
+  if (state === "signed-out") return <EmptyState title="로그인이 필요합니다" actions={<Button label="로그인" href="/login" variant="primary" />} headingLevel={1} />;
+  if (state === "not-found") return <EmptyState title="제안을 찾을 수 없습니다" description="삭제되었거나 현재 계정에 공개되지 않은 제안입니다." actions={<Button label="제안 목록으로" href="/proposals" />} headingLevel={1} />;
+  if (state === "error" || !proposal) return <Banner status="error" title="제안을 불러오지 못했습니다" description="잠시 후 다시 시도해 주세요." />;
 
   const student = user?.roles.includes("STUDENT") ?? false;
   const teacher = user?.roles.includes("TEACHER") ?? false;
   const gathering = proposal.workflowStatus === "GATHERING_SUPPORT";
-  return (
-    <article className="proposal-detail">
-      <Link className="back-link" href="/proposals">← 제안 목록</Link>
-      <div className="proposal-detail-meta">
-        <span>{proposal.authorVisibility === "NAMED" ? proposal.authorDisplayName : "익명"}</span>
-        <time dateTime={proposal.createdAt}>{formatDateTime(proposal.createdAt)}</time>
-      </div>
-      <p className="proposal-status-label">{statusLabels[proposal.workflowStatus] ?? proposal.workflowStatus}</p>
-      <h1>{proposal.title}</h1>
-      <div className="proposal-content">{proposal.content}</div>
+  const statusLabel = statusLabels[proposal.workflowStatus] ?? proposal.workflowStatus;
 
-      <section className="support-panel" aria-labelledby="support-title">
-        <div>
-          <h2 id="support-title">{gathering ? "정식 안건까지" : "정식 안건"}</h2>
-          {gathering ? (
-            <p><strong>{proposal.supportCount}</strong> / {proposal.supportThreshold}명 동의</p>
-          ) : (
-            <p>
-              승격 당시 <strong>{proposal.formalizedSupportCount ?? proposal.supportThreshold}</strong>명
-              {proposal.supportCount !== proposal.formalizedSupportCount
-                ? ` · 현재 ${proposal.supportCount}명 동의`
-                : ""}
-            </p>
-          )}
-        </div>
-        {student ? (
-          proposal.viewerSupported && !gathering ? (
-            <p className="support-locked">동의함 · 정식 안건 이후에는 철회할 수 없습니다.</p>
-          ) : (
-            <button className={proposal.viewerSupported ? "secondary-button" : "primary-button"} type="button" disabled={actionPending} onClick={() => void changeSupport()}>
-              {actionPending ? "처리 중…" : proposal.viewerSupported ? "동의 철회" : "동의하기"}
-            </button>
-          )
+  return (
+    <VStack as="article" gap={8}>
+      <VStack gap={4}>
+        <Button label="제안 목록으로" href="/proposals" variant="ghost" />
+        <HStack gap={2} vAlign="center">
+          <StatusDot variant={statusVariants[proposal.workflowStatus] ?? "neutral"} label={statusLabel} />
+          <Text type="label">{statusLabel}</Text>
+        </HStack>
+        <Heading level={1} type="display-2" textWrap="balance">{proposal.title}</Heading>
+        <MetadataList orientation="horizontal">
+          <MetadataListItem label="작성자">{proposal.authorVisibility === "NAMED" ? proposal.authorDisplayName : "익명"}</MetadataListItem>
+          <MetadataListItem label="등록">{dateTimeFormatter.format(new Date(proposal.createdAt))}</MetadataListItem>
+        </MetadataList>
+        {proposal.viewerCanEdit ? (
+          <HStack gap={2} wrap="wrap">
+            <Button label="제안 수정" href={`/proposals/${publicId}/edit`} variant="secondary" />
+            <Button label="제안 철회" variant="destructive" onClick={() => setWithdrawOpen(true)} />
+          </HStack>
         ) : null}
-      </section>
-      {error ? <p className="form-error" role="alert">{error}</p> : null}
-      {notice ? <p className="form-notice" role="status">{notice}</p> : null}
+        <Text as="p" type="large" className="pre-wrap wrap-anywhere">{proposal.content}</Text>
+      </VStack>
+
+      <Section variant="muted" padding={6} aria-labelledby="support-title">
+        <VStack gap={4}>
+          <HStack hAlign="between" vAlign="center" gap={4} wrap="wrap">
+            <VStack gap={1}>
+              <Heading level={2} id="support-title">{gathering ? "정식 안건까지" : "정식 안건"}</Heading>
+              <Text as="p" color="secondary" hasTabularNumbers>
+                {gathering ? `${proposal.supportCount} / ${proposal.supportThreshold}명 동의` : `승격 당시 ${proposal.formalizedSupportCount ?? proposal.supportThreshold}명 · 현재 ${proposal.supportCount}명 동의`}
+              </Text>
+            </VStack>
+            {student ? proposal.viewerSupported && !gathering ? (
+              <Text type="supporting">동의함 · 정식 안건 이후에는 철회할 수 없습니다.</Text>
+            ) : (
+              <Button label={proposal.viewerSupported ? "동의 철회" : "동의하기"} variant={proposal.viewerSupported ? "secondary" : "primary"} isLoading={actionPending} isDisabled={actionPending} clickAction={changeSupport} />
+            ) : null}
+          </HStack>
+          <ProgressBar value={proposal.supportCount} max={proposal.supportThreshold} label={`${proposal.supportCount}명 동의`} hasValueLabel variant={gathering ? "accent" : "success"} />
+        </VStack>
+      </Section>
+      {error ? <Banner status="error" title="동의 상태를 변경할 수 없습니다" description={error} /> : null}
+      {notice ? <Banner status="success" title={notice} /> : null}
+
+      <ProposalComments publicId={publicId} canComment={student} />
 
       <ProposalReportForm publicId={publicId} />
 
-      {proposal.officialResponses.length > 0 ? (
-        <section className="proposal-responses" aria-labelledby="responses-title">
-          <div className="proposal-section-heading">
-            <p className="eyebrow">학교 공식 기록</p>
-            <h2 id="responses-title">공식 답변과 실행 현황</h2>
-          </div>
-          <ol>
+      <VStack as="section" gap={4} aria-labelledby="responses-title">
+        <VStack gap={1}>
+          <Heading level={2} id="responses-title">학교 공식 답변과 실행 현황</Heading>
+          <Text as="p" color="secondary">학교가 남긴 결정, 사유, 후속 계획을 시간순으로 확인할 수 있습니다.</Text>
+        </VStack>
+        {proposal.officialResponses.length ? (
+          <List density="spacious" hasDividers>
             {proposal.officialResponses.map((response, index) => (
-              <li key={`${response.resultingStatus}-${response.createdAt}-${index}`}>
-                <div>
-                  <strong>{statusLabels[response.resultingStatus ?? ""] ?? response.resultingStatus}</strong>
-                  {response.createdAt ? <time dateTime={response.createdAt}>{formatDateTime(response.createdAt)}</time> : null}
-                </div>
-                <p className="official-response-content">{response.content}</p>
-                <dl>
-                  <div><dt>결정·변경 사유</dt><dd>{response.decisionReason}</dd></div>
-                  {response.followUpPlan ? <div><dt>후속 계획</dt><dd>{response.followUpPlan}</dd></div> : null}
-                </dl>
-              </li>
+              <ListItem
+                key={`${response.resultingStatus}-${response.createdAt}-${index}`}
+                label={
+                  <VStack gap={2}>
+                    <HStack hAlign="between" gap={2} wrap="wrap">
+                      <Heading level={3}>{statusLabels[response.resultingStatus ?? ""] ?? response.resultingStatus}</Heading>
+                      {response.createdAt ? <Text type="supporting" color="secondary">{dateTimeFormatter.format(new Date(response.createdAt))}</Text> : null}
+                    </HStack>
+                    <Text as="p" className="pre-wrap">{response.content}</Text>
+                    <MetadataList columns="single">
+                      <MetadataListItem label="결정·변경 사유">{response.decisionReason}</MetadataListItem>
+                      {response.followUpPlan ? <MetadataListItem label="후속 계획">{response.followUpPlan}</MetadataListItem> : null}
+                    </MetadataList>
+                  </VStack>
+                }
+              />
             ))}
-          </ol>
-        </section>
-      ) : !gathering ? (
-        <p className="proposal-empty-response">아직 등록된 학교 공식 답변이 없습니다.</p>
-      ) : null}
+          </List>
+        ) : <EmptyState title={gathering ? "공식 답변 전 단계입니다" : "아직 등록된 공식 답변이 없습니다"} isCompact />}
+      </VStack>
 
       {proposal.viewerCanManage ? (
-        <ProposalWorkflowPanel
-          publicId={publicId}
-          workflowStatus={proposal.workflowStatus}
-          onUpdated={async () => {
-            const updated = await apiGet<ProposalDetailResponse>(`/api/v1/proposals/${publicId}`);
-            setProposal(updated);
-          }}
-        />
-      ) : teacher && !gathering ? (
-        <p className="proposal-assignment-note">내부 지정된 담당 교사만 이 안건의 상태와 공식 답변을 변경할 수 있습니다.</p>
-      ) : null}
+        <ProposalWorkflowPanel publicId={publicId} workflowStatus={proposal.workflowStatus} onUpdated={async () => setProposal(await apiGet<ProposalDetailResponse>(`/api/v1/proposals/${publicId}`))} />
+      ) : teacher && !gathering ? <Banner status="info" title="담당 교사만 변경할 수 있습니다" description="내부 지정된 담당 교사만 이 안건의 상태와 공식 답변을 변경할 수 있습니다." /> : null}
 
-      <section className="proposal-history" aria-labelledby="history-title">
-        <h2 id="history-title">진행 이력</h2>
-        <ol>
+      <VStack as="section" gap={3} aria-labelledby="history-title">
+        <Heading level={2} id="history-title">진행 이력</Heading>
+        <List listStyle="decimal" density="balanced" hasDividers>
           {proposal.statusHistory.map((history) => (
-            <li key={`${history.toStatus}-${history.createdAt}`}>
-              <div>
-                <strong>{statusLabels[history.toStatus] ?? history.toStatus}</strong>
-                <time dateTime={history.createdAt}>{formatDateTime(history.createdAt)}</time>
-              </div>
-              <p>{history.reason}</p>
-              {history.supportCountSnapshot !== undefined ? <small>유효 동의 {history.supportCountSnapshot}명</small> : null}
-            </li>
+            <ListItem
+              key={`${history.toStatus}-${history.createdAt}`}
+              label={statusLabels[history.toStatus] ?? history.toStatus}
+              description={`${history.reason} · ${dateTimeFormatter.format(new Date(history.createdAt))}${history.supportCountSnapshot !== undefined ? ` · 유효 동의 ${history.supportCountSnapshot}명` : ""}`}
+            />
           ))}
-        </ol>
-      </section>
-    </article>
+        </List>
+      </VStack>
+
+      <AlertDialog
+        isOpen={withdrawOpen}
+        onOpenChange={setWithdrawOpen}
+        title="제안을 철회할까요?"
+        description="학생 공개 목록과 직접 조회에서 사라지지만 감사와 보안 기록은 보존됩니다. 철회한 제안은 다시 공개할 수 없습니다."
+        cancelLabel="취소"
+        actionLabel="제안 철회"
+        isActionLoading={withdrawPending}
+        onAction={() => void withdrawProposal()}
+      />
+    </VStack>
   );
 }

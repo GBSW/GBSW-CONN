@@ -2,6 +2,11 @@
 
 import type { components } from "@/lib/api-schema";
 import { apiPost, errorMessage } from "@/lib/api-client";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { FormLayout } from "@astryxdesign/core/FormLayout";
+import { HStack, VStack } from "@astryxdesign/core/Stack";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
@@ -10,6 +15,8 @@ type CurrentUserResponse = components["schemas"]["CurrentUserResponse"];
 
 export function LoginForm() {
   const router = useRouter();
+  const [loginId, setLoginId] = useState("");
+  const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -17,14 +24,10 @@ export function LoginForm() {
     event.preventDefault();
     setSubmitting(true);
     setError(null);
-    const form = new FormData(event.currentTarget);
-    const request: LoginRequest = {
-      loginId: String(form.get("loginId") ?? ""),
-      password: String(form.get("password") ?? ""),
-    };
+    const request: LoginRequest = { loginId, password };
     try {
       await apiPost<CurrentUserResponse>("/api/v1/auth/login", request);
-      router.replace("/");
+      router.replace("/dashboard");
       router.refresh();
     } catch (caught) {
       setError(errorMessage(caught));
@@ -34,27 +37,19 @@ export function LoginForm() {
   }
 
   return (
-    <form className="auth-form" onSubmit={(event) => void submit(event)}>
-      <div className="field">
-        <label htmlFor="login-id">로그인 ID</label>
-        <input id="login-id" name="loginId" autoComplete="username" required />
-      </div>
-      <div className="field">
-        <label htmlFor="password">비밀번호</label>
-        <input id="password" name="password" type="password" autoComplete="current-password" required />
-      </div>
-      {error ? (
-        <p className="form-error" role="alert">
-          {error}
-        </p>
-      ) : null}
-      <button className="primary-button" type="submit" disabled={submitting}>
-        {submitting ? "확인 중…" : "로그인"}
-      </button>
-      <div className="form-links">
-        <a href="/activate">처음 사용하는 계정인가요?</a>
-        <a href="/password-reset">재설정 코드를 받았나요?</a>
-      </div>
+    <form onSubmit={(event) => void submit(event)}>
+      <VStack gap={4}>
+        <FormLayout>
+          <TextInput label="로그인 ID" htmlName="loginId" value={loginId} onChange={setLoginId} isRequired width="100%" />
+          <TextInput label="비밀번호" htmlName="password" type="password" value={password} onChange={setPassword} isRequired width="100%" />
+        </FormLayout>
+        {error ? <Banner status="error" title="로그인할 수 없습니다" description={error} /> : null}
+        <Button label="로그인" type="submit" variant="primary" width="100%" isLoading={submitting} isDisabled={submitting} />
+        <HStack gap={2} wrap="wrap">
+          <Button label="계정 활성화" href="/activate" variant="ghost" size="sm" />
+          <Button label="비밀번호 재설정" href="/password-reset" variant="ghost" size="sm" />
+        </HStack>
+      </VStack>
     </form>
   );
 }
