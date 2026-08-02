@@ -1,0 +1,33 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# 로컬 개발용 Docker Compose
+#
+# 사용법:
+#   1. .env.example 을 복사해 .env 를 만들고 값을 채운다.
+#   2. docker compose up -d
+#
+# TODO: 백엔드 프로젝트 기반이 초기화된 뒤 MySQL 서비스를 아래에 추가한다.
+#       포트, 계정, DB 이름은 모두 .env 환경변수로 주입한다.
+#       실제 DB_PASSWORD, DB_ROOT_PASSWORD 는 절대 이 파일에 하드코딩하지 않는다.
+# ──────────────────────────────────────────────────────────────────────────────
+
+services:
+  # mysql:
+  #   image: mysql:8.4        # TODO: 백엔드 초기화 단계에서 버전 확정 후 채운다.
+  #   platform: linux/amd64
+  #   restart: unless-stopped
+  #   environment:
+  #     MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+  #     MYSQL_DATABASE:      ${DB_NAME}
+  #     MYSQL_USER:          ${DB_USERNAME}
+  #     MYSQL_PASSWORD:      ${DB_PASSWORD}
+  #   ports:
+  #     - "${DB_PORT:-3306}:3306"
+  #   volumes:
+  #     - mysql_data:/var/lib/mysql
+  #   command: >
+  #     --character-set-server=utf8mb4
+  #     --collation-server=utf8mb4_unicode_ci
+  #     --default-storage-engine=InnoDB
+
+# volumes:
+#   mysql_data:
