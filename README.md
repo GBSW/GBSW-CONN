@@ -83,11 +83,20 @@ docker-compose.yml
 
 ## 8. 사전 설치
 
-- JDK 25.0.4 계열
+- JDK 25.0.4 계열 (설치하지 않으면 Gradle이 자동으로 내려받는다. 아래 참고)
 - Node.js 24.18.0과 npm 10.9 이상
 - Docker Desktop 또는 Docker Engine + Compose v2
 
-macOS Homebrew OpenJDK가 `/usr/libexec/java_home`에 보이지 않으면 다음처럼 현재 셸에만 경로를 지정한다.
+JDK 25를 찾지 못하면 Gradle이 Eclipse Temurin 25를 자동으로 내려받아 `~/.gradle/jdks` 아래에 둔다. 첫 빌드에만 발생하며 네트워크와 수백 MB의 디스크를 사용한다. 이미 설치된 JDK 25가 있으면 그것을 그대로 쓰고 추가 다운로드는 하지 않는다.
+
+선택된 툴체인은 다음으로 확인한다.
+
+```bash
+cd backend
+./gradlew -q javaToolchains
+```
+
+자동 다운로드를 원하지 않으면 JDK 25를 직접 설치한다. macOS Homebrew OpenJDK가 `/usr/libexec/java_home`에 보이지 않으면 다음처럼 현재 셸에만 경로를 지정한다.
 
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home
@@ -262,7 +271,7 @@ E2E는 빈 MySQL에 Flyway 마이그레이션을 적용하고 학생 50명, 교�
 
 ## 21. 자주 발생하는 문제
 
-- `Cannot find a Java installation ... 25`: 위 macOS `JAVA_HOME` 예시를 적용한다.
+- `Cannot find a Java installation ... 25`: 네트워크가 차단된 환경에서 Gradle이 JDK를 내려받지 못한 경우다. JDK 25를 직접 설치하고 위 macOS `JAVA_HOME` 예시를 적용한다.
 - `DB_PASSWORD` 누락: `.env.example`을 복사한 뒤 백엔드 실행 셸에서 export한다.
 - MySQL 포트 충돌: `.env`의 `MYSQL_PORT`와 `DB_URL` 포트를 함께 변경한다.
 - OpenAPI 타입 생성 연결 실패: 백엔드와 MySQL health를 먼저 확인한다.
