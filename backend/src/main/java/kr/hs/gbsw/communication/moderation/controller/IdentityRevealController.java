@@ -34,7 +34,7 @@ public class IdentityRevealController {
 
     @PostMapping("/{publicId}/reveal")
     @PreAuthorize("hasRole('TEACHER')")
-    @Operation(summary = "작성자 신원 일회 확인", description = "승인 사건의 학생부장이 최근 재인증 후 한 번만 확인할 수 있습니다.")
+    @Operation(summary = "작성자 신원 일회 확인", description = "승인 사건의 학생부장교사이 최근 재인증 후 한 번만 확인할 수 있습니다.")
     public ResponseEntity<IdentityRevealResponse> reveal(
             @AuthenticationPrincipal AuthPrincipal actor,
             @PathVariable UUID publicId,

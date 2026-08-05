@@ -14,7 +14,7 @@ export default async function ModerationCasePage({
 }) {
   const { publicId } = await params;
   return (
-    <StaffAppShell>
+    <StaffAppShell requires="reviewer">
       <VStack className="page-frame motion-reveal" maxWidth="56rem" paddingBlock={4}>
         <ModerationCaseDetail publicId={publicId} />
       </VStack>

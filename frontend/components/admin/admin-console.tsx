@@ -2,6 +2,8 @@
 
 import type { components } from "@/lib/api-schema";
 import { ApiRequestError, apiGet, apiPost, errorMessage } from "@/lib/api-client";
+import type { AccountRole, OfficeType } from "@/lib/roles";
+import { officeLabels, offices, roleLabels, roles } from "@/lib/roles";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
@@ -34,11 +36,6 @@ type RoleAssignmentRequest = components["schemas"]["RoleAssignmentRequest"];
 type OfficeAppointmentRequest = components["schemas"]["OfficeAppointmentRequest"];
 type EndAssignmentRequest = components["schemas"]["EndAssignmentRequest"];
 type AccountStatus = "" | "PENDING_ACTIVATION" | "ACTIVE" | "SUSPENDED" | "DEACTIVATED";
-type AccountRole = CreateAccountRequest["role"];
-type OfficeType =
-  | "STUDENT_AFFAIRS_TEACHER"
-  | "STUDENT_COUNCIL_PRESIDENT"
-  | "STUDENT_COUNCIL_VICE_PRESIDENT";
 type AdminConsoleMode = "accounts" | "create" | "offices";
 
 const statusLabels: Record<string, string> = {
@@ -47,21 +44,6 @@ const statusLabels: Record<string, string> = {
   SUSPENDED: "정지",
   DEACTIVATED: "비활성",
 };
-
-const roleLabels: Record<AccountRole, string> = {
-  STUDENT: "학생",
-  TEACHER: "교사",
-  SUPER_ADMIN: "슈퍼 어드민",
-};
-
-const officeLabels: Record<OfficeType, string> = {
-  STUDENT_AFFAIRS_TEACHER: "학생생활 담당 교사",
-  STUDENT_COUNCIL_PRESIDENT: "학생회장",
-  STUDENT_COUNCIL_VICE_PRESIDENT: "학생부회장",
-};
-
-const roles = Object.keys(roleLabels) as AccountRole[];
-const offices = Object.keys(officeLabels) as OfficeType[];
 
 function formText(form: FormData, name: string): string {
   return String(form.get(name) ?? "").trim();
@@ -87,6 +69,7 @@ function periodText(startsAt?: string, endsAt?: string): string {
 
 const roleOptions = roles.map((role) => ({ value: role, label: roleLabels[role] }));
 const officeOptions = offices.map((office) => ({ value: office, label: officeLabels[office] }));
+
 const statusOptions = [{ value: "", label: "전체" }, ...Object.entries(statusLabels).map(([value, label]) => ({ value, label }))];
 
 function FormText({ label, name, type = "text", description }: { label: string; name: string; type?: "text" | "password"; description?: string }) {
@@ -557,7 +540,7 @@ export function AdminConsole({ mode = "accounts" }: { mode?: AdminConsoleMode })
 
               {mode === "offices" ? (
                 <VStack gap={4}>
-                  <Text as="p" color="secondary">학생생활 담당 교사, 학생회장, 학생부회장 세 보직만 임명합니다. 먼저 위에서 대상 계정을 선택해 주세요.</Text>
+                  <Text as="p" color="secondary">학생부장교사, 학생회장, 학생부회장 세 보직만 임명합니다. 먼저 위에서 대상 계정을 선택해 주세요.</Text>
                   <CollapsibleGroup type="single" defaultValue="office-appoint" hasDividers density="spacious">
                     <Collapsible trigger="보직 임명" value="office-appoint">
                       <Section variant="section" padding={4}>

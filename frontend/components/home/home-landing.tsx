@@ -37,6 +37,15 @@ export function HomeLanding() {
     return () => { active = false; };
   }, [router]);
 
+  // 안내 내용은 로그인 상태를 확인한 뒤에 그려지므로 라우터가 최초 해시 스크롤을
+  // 시도하는 시점에는 대상 섹션이 아직 없다. 준비된 뒤 한 번 더 이동시킨다.
+  useEffect(() => {
+    if (!ready) return;
+    const hash = window.location.hash;
+    if (!hash || hash === "#") return;
+    document.getElementById(hash.slice(1))?.scrollIntoView();
+  }, [ready]);
+
   if (!ready) {
     return (
       <PublicAppShell>

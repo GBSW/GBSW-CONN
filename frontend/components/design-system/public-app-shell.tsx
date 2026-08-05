@@ -23,7 +23,7 @@ export function PublicAppShell({
       heading={<TopNavHeading heading="GBSW 제안" headingHref="/" />}
       startContent={
         <>
-          <TopNavItem label="서비스 안내" href="/" isSelected={pathname === "/"} />
+          <TopNavItem label="서비스 안내" href="/#process" isSelected={pathname === "/"} />
           <TopNavItem label="제안 보기" href="/proposals" isSelected={proposalRoute && pathname !== "/proposals/new"} />
           {isMobile ? <AuthStatus /> : null}
         </>
