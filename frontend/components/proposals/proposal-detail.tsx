@@ -23,6 +23,7 @@ import { useRouter } from "next/navigation";
 
 type CurrentUser = components["schemas"]["CurrentUserResponse"];
 type ProposalDetailResponse = components["schemas"]["ProposalDetailResponse"];
+type ProposalStatusHistory = components["schemas"]["ProposalStatusHistoryResponse"];
 type SupportResponse = components["schemas"]["SupportResponse"];
 
 const dateTimeFormatter = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", dateStyle: "medium", timeStyle: "short" });
@@ -34,6 +35,19 @@ const statusVariants: Record<string, "accent" | "success" | "warning" | "error" 
   GATHERING_SUPPORT: "accent", FORMAL_AGENDA: "success", UNDER_REVIEW: "accent", ACCEPTED: "success",
   ON_HOLD: "warning", REJECTED: "error", IN_PROGRESS: "accent", COMPLETED: "success",
 };
+
+/**
+ * 진행 이력 한 줄의 설명을 만든다.
+ * 동의 수는 nullable이므로 문자열에 그대로 보간하지 않는다. 값이 없으면 해당
+ * 지표를 빼고, `null명` 같은 표기가 화면에 나가지 않게 한다.
+ */
+function historyDescription(history: ProposalStatusHistory): string {
+  const parts = [history.reason, dateTimeFormatter.format(new Date(history.createdAt))];
+  if (typeof history.supportCountSnapshot === "number" && Number.isFinite(history.supportCountSnapshot)) {
+    parts.push(`전환 당시 유효 동의 ${history.supportCountSnapshot}명`);
+  }
+  return parts.join(" · ");
+}
 
 export function ProposalDetail({ publicId }: { publicId: string }) {
   const router = useRouter();
@@ -198,7 +212,7 @@ export function ProposalDetail({ publicId }: { publicId: string }) {
             <ListItem
               key={`${history.toStatus}-${history.createdAt}`}
               label={statusLabels[history.toStatus] ?? history.toStatus}
-              description={`${history.reason} · ${dateTimeFormatter.format(new Date(history.createdAt))}${history.supportCountSnapshot !== undefined ? ` · 유효 동의 ${history.supportCountSnapshot}명` : ""}`}
+              description={historyDescription(history)}
             />
           ))}
         </List>

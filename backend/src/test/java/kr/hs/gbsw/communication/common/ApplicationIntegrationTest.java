@@ -1025,6 +1025,22 @@ class ApplicationIntegrationTest {
                         WHERE proposal.public_id = UUID_TO_BIN(?)
                           AND history.changed_by_user_id = UUID_TO_BIN(?)
                         """, Integer.class, acceptedPublicId.toString(), teacher.id().toString())).isEqualTo(4);
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM proposal_status_history history
+                        JOIN proposals proposal ON proposal.id = history.proposal_id
+                        WHERE proposal.public_id = UUID_TO_BIN(?)
+                          AND history.changed_by_user_id = UUID_TO_BIN(?)
+                          AND history.support_count_snapshot IS NULL
+                        """, Integer.class, acceptedPublicId.toString(), teacher.id().toString())).isZero();
+        // 이 제안의 유효 동의는 작성자 본인의 자동 1표뿐이다. 전이 이력은 그 시점의
+        // 실제 값을 담아야 하며 승격 시 기록된 50을 되풀이해서는 안 된다.
+        assertThat(jdbcTemplate.queryForList("""
+                        SELECT history.support_count_snapshot FROM proposal_status_history history
+                        JOIN proposals proposal ON proposal.id = history.proposal_id
+                        WHERE proposal.public_id = UUID_TO_BIN(?)
+                          AND history.changed_by_user_id = UUID_TO_BIN(?)
+                        """, Integer.class, acceptedPublicId.toString(), teacher.id().toString()))
+                .containsExactly(1, 1, 1, 1);
 
         UUID rejectedPublicId = createFormalProposal(student, "보류 후 반려 검증");
         assignTeacherForTest(rejectedPublicId, teacher);
