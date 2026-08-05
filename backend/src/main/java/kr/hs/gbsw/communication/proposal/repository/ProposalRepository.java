@@ -323,9 +323,7 @@ public class ProposalRepository {
         parameters.addAll(filter.parameters());
         parameters.add(size);
         parameters.add(offset);
-        String orderBy = sort == ProposalSort.MOST_SUPPORTED
-                ? "support_count DESC, p.created_at DESC, p.id"
-                : "p.created_at DESC, p.id";
+        String orderBy = orderBy(sort);
 
         return jdbcTemplate.query("""
                         SELECT BIN_TO_UUID(p.public_id) AS public_id,
@@ -413,6 +411,22 @@ public class ProposalRepository {
                 publicId.toString());
     }
 
+    /**
+     * 정렬 기준을 SQL로 옮긴다.
+     *
+     * 마지막에 항상 `p.id`를 붙여 같은 조건으로 두 번 조회했을 때 순서가 같도록
+     * 한다. 이 고정 기준이 없으면 동률 항목의 순서가 요청마다 달라져 페이지를
+     * 넘길 때 항목이 중복되거나 빠질 수 있다.
+     */
+    private String orderBy(ProposalSort sort) {
+        return switch (sort) {
+            case LATEST -> "p.created_at DESC, p.id DESC";
+            case OLDEST -> "p.created_at ASC, p.id ASC";
+            case MOST_SUPPORTED -> "support_count DESC, p.created_at DESC, p.id DESC";
+            case LEAST_SUPPORTED -> "support_count ASC, p.created_at DESC, p.id DESC";
+        };
+    }
+
     private FeedFilter feedFilter(boolean studentView, ProposalFeedScope scope, String query) {
         List<String> predicates = new ArrayList<>();
         List<Object> parameters = new ArrayList<>();
@@ -420,6 +434,9 @@ public class ProposalRepository {
         predicates.add("p.withdrawn_at IS NULL");
         if (!studentView || scope == ProposalFeedScope.FORMAL_AGENDA) {
             predicates.add("p.workflow_status <> 'GATHERING_SUPPORT'");
+        }
+        if (scope == ProposalFeedScope.REJECTED) {
+            predicates.add("p.workflow_status = 'REJECTED'");
         }
         if (query != null && !query.isBlank()) {
             String escaped = "%" + escapeLike(query.strip()) + "%";

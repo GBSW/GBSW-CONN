@@ -28,6 +28,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.stream.StreamSupport;
 import kr.hs.gbsw.communication.auth.domain.AuthPrincipal;
 import kr.hs.gbsw.communication.moderation.domain.ModerationCaseStatus;
 import kr.hs.gbsw.communication.moderation.domain.ModerationCaseType;
@@ -576,6 +577,95 @@ class ApplicationIntegrationTest {
                                 {"title":"교사 작성 시도","content":"허용되지 않음","authorVisibility":"NAMED"}
                                 """))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void proposalFeedFiltersRejectedAndSortsByDateAndSupportInBothDirections() throws Exception {
+        SeedAccount author = createActiveAccount(
+                "feed.author", "피드 작성 학생", "STUDENT", "author secure passphrase");
+        createActiveAccount("feed.supporter.one", "동의 학생 1", "STUDENT", "supporter one passphrase");
+        createActiveAccount("feed.supporter.two", "동의 학생 2", "STUDENT", "supporter two passphrase");
+        SeedAccount teacher = createActiveAccount(
+                "feed.teacher", "피드 교사", "TEACHER", "teacher secure passphrase");
+        Cookie authorSession = requireSessionCookie(login("feed.author", "author secure passphrase"));
+        Cookie firstSupporterSession = requireSessionCookie(
+                login("feed.supporter.one", "supporter one passphrase"));
+        Cookie secondSupporterSession = requireSessionCookie(
+                login("feed.supporter.two", "supporter two passphrase"));
+        Cookie teacherSession = requireSessionCookie(login("feed.teacher", "teacher secure passphrase"));
+
+        UUID oldest = createGatheringProposal(authorSession, "가장 오래된 제안");
+        UUID middle = createGatheringProposal(authorSession, "중간에 올라온 제안");
+        UUID newest = createGatheringProposal(authorSession, "가장 최근 제안");
+
+        // 등록 시각을 명시적으로 벌려 날짜 정렬 결과가 실행마다 흔들리지 않게 한다.
+        Instant base = Instant.now().truncatedTo(ChronoUnit.MICROS).minusSeconds(3600);
+        setProposalCreatedAt(oldest, base);
+        setProposalCreatedAt(middle, base.plusSeconds(60));
+        setProposalCreatedAt(newest, base.plusSeconds(120));
+
+        // 작성자 자동 1표 위에 동의를 더해 동의 수를 오래된 1 · 최근 2 · 중간 3으로 만든다.
+        mockMvc.perform(put("/api/v1/proposals/{publicId}/support", middle)
+                .cookie(firstSupporterSession).with(csrf())).andExpect(status().isOk());
+        mockMvc.perform(put("/api/v1/proposals/{publicId}/support", middle)
+                .cookie(secondSupporterSession).with(csrf())).andExpect(status().isOk());
+        mockMvc.perform(put("/api/v1/proposals/{publicId}/support", newest)
+                .cookie(firstSupporterSession).with(csrf())).andExpect(status().isOk());
+
+        assertThat(feedTitles(authorSession, "sort=LATEST"))
+                .containsExactly("가장 최근 제안", "중간에 올라온 제안", "가장 오래된 제안");
+        assertThat(feedTitles(authorSession, "sort=OLDEST"))
+                .containsExactly("가장 오래된 제안", "중간에 올라온 제안", "가장 최근 제안");
+        assertThat(feedTitles(authorSession, "sort=MOST_SUPPORTED"))
+                .containsExactly("중간에 올라온 제안", "가장 최근 제안", "가장 오래된 제안");
+        assertThat(feedTitles(authorSession, "sort=LEAST_SUPPORTED"))
+                .containsExactly("가장 오래된 제안", "가장 최근 제안", "중간에 올라온 제안");
+
+        // 같은 조건을 두 번 조회해도 순서가 같아야 페이지를 넘길 때 항목이 중복되거나 빠지지 않는다.
+        assertThat(feedTitles(authorSession, "sort=LATEST"))
+                .isEqualTo(feedTitles(authorSession, "sort=LATEST"));
+
+        // 검색은 제목과 본문을 함께 찾으며 검색어가 어느 위치에 있어도 걸린다.
+        assertThat(feedTitles(authorSession, "sort=LATEST&query=중간에"))
+                .containsExactly("중간에 올라온 제안");
+        assertThat(feedTitles(authorSession, "sort=LATEST&query=%"))
+                .isEmpty();
+
+        UUID rejected = createFormalProposal(author, "반려될 정식 안건");
+        assignTeacherForTest(rejected, teacher);
+        mockMvc.perform(post("/api/v1/proposals/{publicId}/review-start", rejected)
+                        .cookie(teacherSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"반려 검증을 위한 검토 시작\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/proposals/{publicId}/decisions/reject", rejected)
+                        .cookie(teacherSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"content":"이번에는 채택하지 않습니다.","decisionReason":"예산 편성 주기가 맞지 않습니다."}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.workflowStatus").value("REJECTED"));
+
+        assertThat(feedTitles(authorSession, "scope=REJECTED"))
+                .containsExactly("반려될 정식 안건");
+        assertThat(feedTitles(authorSession, "scope=FORMAL_AGENDA"))
+                .containsExactly("반려될 정식 안건");
+        assertThat(feedTitles(authorSession, "scope=ALL")).hasSize(4);
+
+        // UI에 없는 값으로 요청해도 서버 오류가 아니라 검증 실패로 응답해야 한다.
+        mockMvc.perform(get("/api/v1/proposals?sort=NOT_A_SORT").cookie(authorSession))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        mockMvc.perform(get("/api/v1/proposals?scope=NOT_A_SCOPE").cookie(authorSession))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        mockMvc.perform(get("/api/v1/proposals?size=999").cookie(authorSession))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        mockMvc.perform(get("/api/v1/proposals?page=-1").cookie(authorSession))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
     }
 
     @Test
@@ -1605,6 +1695,36 @@ class ApplicationIntegrationTest {
                 UUID.randomUUID().toString(), id.toString(), role,
                 Timestamp.from(now.minusSeconds(1)), Timestamp.from(now));
         return new SeedAccount(id, publicId, loginId);
+    }
+
+    private UUID createGatheringProposal(Cookie session, String title) throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/proposals")
+                        .cookie(session).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "title", title,
+                                "content", "제안 목록의 검색·필터·정렬을 검증하기 위한 제안 본문입니다.",
+                                "authorVisibility", "NAMED"))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        JsonNode body = objectMapper.readTree(created.getResponse().getContentAsString());
+        return UUID.fromString(body.get("publicId").asText());
+    }
+
+    private void setProposalCreatedAt(UUID proposalPublicId, Instant createdAt) {
+        jdbcTemplate.update(
+                "UPDATE proposals SET created_at = ? WHERE public_id = UUID_TO_BIN(?)",
+                Timestamp.from(createdAt), proposalPublicId.toString());
+    }
+
+    private List<String> feedTitles(Cookie session, String queryString) throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/v1/proposals?" + queryString).cookie(session))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode items = objectMapper.readTree(result.getResponse().getContentAsString()).get("items");
+        return StreamSupport.stream(items.spliterator(), false)
+                .map(item -> item.get("title").asText())
+                .toList();
     }
 
     private UUID createFormalProposal(SeedAccount creator, String title) {

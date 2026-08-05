@@ -1,5 +1,6 @@
 package kr.hs.gbsw.communication.common.exception;
 
+import jakarta.validation.ConstraintViolationException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -17,6 +18,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -45,6 +48,37 @@ public class GlobalExceptionHandler {
                 now(),
                 traceId(),
                 fields));
+    }
+
+    /**
+     * 열거형이나 숫자 파라미터에 해석할 수 없는 값이 들어온 경우다.
+     * 이 어드바이스가 Exception 전체를 받으므로 여기서 잡지 않으면 500으로 나간다.
+     * 받은 값을 그대로 되돌려주지 않고 어떤 파라미터가 문제인지만 알린다.
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException exception) {
+        return ResponseEntity.badRequest().body(new ErrorResponse(
+                "VALIDATION_FAILED",
+                "요청 값을 확인해 주세요.",
+                now(),
+                traceId(),
+                List.of(new FieldErrorResponse(exception.getName(), "허용되지 않는 값입니다."))));
+    }
+
+    /**
+     * 컨트롤러 파라미터의 제약(@Min, @Max, @Size 등) 위반.
+     *
+     * `@Validated`가 붙은 컨트롤러는 AOP 경로를 타 ConstraintViolationException을,
+     * 그렇지 않은 컨트롤러는 HandlerMethodValidationException을 던진다. 두 경로 모두
+     * 여기서 잡지 않으면 500으로 나간다.
+     */
+    @ExceptionHandler({ConstraintViolationException.class, HandlerMethodValidationException.class})
+    ResponseEntity<ErrorResponse> handleParameterValidation(Exception exception) {
+        return ResponseEntity.badRequest().body(ErrorResponse.of(
+                "VALIDATION_FAILED",
+                "요청 값을 확인해 주세요.",
+                now(),
+                traceId()));
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)

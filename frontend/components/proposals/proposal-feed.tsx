@@ -1,6 +1,6 @@
 "use client";
 
-import type { components } from "@/lib/api-schema";
+import type { components, paths } from "@/lib/api-schema";
 import { ApiRequestError, apiGet, errorMessage } from "@/lib/api-client";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -22,12 +22,24 @@ import { useEffect, useState } from "react";
 
 type CurrentUser = components["schemas"]["CurrentUserResponse"];
 type ProposalPage = components["schemas"]["ProposalPageResponse"];
-type ProposalScope = "ALL" | "FORMAL_AGENDA";
-type ProposalSort = "LATEST" | "MOST_SUPPORTED";
+type ProposalListQuery = paths["/api/v1/proposals"]["get"]["parameters"]["query"];
+type ProposalScope = NonNullable<NonNullable<ProposalListQuery>["scope"]>;
+type ProposalSort = NonNullable<NonNullable<ProposalListQuery>["sort"]>;
 
 const dateFormatter = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", dateStyle: "medium" });
-const scopeOptions = [{ value: "ALL", label: "전체 제안" }, { value: "FORMAL_AGENDA", label: "정식 안건" }];
-const sortOptions = [{ value: "LATEST", label: "최신순" }, { value: "MOST_SUPPORTED", label: "동의 많은 순" }];
+
+// 값과 표기를 한곳에 두어 API가 받는 값과 화면 선택지가 어긋나지 않게 한다.
+const scopeOptions: { value: ProposalScope; label: string }[] = [
+  { value: "ALL", label: "전체 제안" },
+  { value: "FORMAL_AGENDA", label: "정식 안건" },
+  { value: "REJECTED", label: "채택 안 됨" },
+];
+const sortOptions: { value: ProposalSort; label: string }[] = [
+  { value: "LATEST", label: "최신순" },
+  { value: "OLDEST", label: "날짜순" },
+  { value: "MOST_SUPPORTED", label: "동의 많은 순" },
+  { value: "LEAST_SUPPORTED", label: "동의 적은 순" },
+];
 
 export function ProposalFeed() {
   const isMobile = useMediaQuery("(max-width: 768px)");
