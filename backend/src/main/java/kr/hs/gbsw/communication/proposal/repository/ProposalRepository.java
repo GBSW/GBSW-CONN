@@ -307,7 +307,6 @@ public class ProposalRepository {
 
     public List<ProposalViewRecord> findFeed(
             UUID viewerUserId,
-            boolean studentView,
             ProposalFeedScope scope,
             String query,
             ProposalSort sort,
@@ -315,7 +314,7 @@ public class ProposalRepository {
             int size,
             long offset
     ) {
-        FeedFilter filter = feedFilter(studentView, scope, query);
+        FeedFilter filter = feedFilter(scope, query);
         List<Object> parameters = new ArrayList<>();
         parameters.add(Timestamp.from(now));
         parameters.add(Timestamp.from(now));
@@ -349,8 +348,8 @@ public class ProposalRepository {
                 parameters.toArray());
     }
 
-    public long countFeed(boolean studentView, ProposalFeedScope scope, String query) {
-        FeedFilter filter = feedFilter(studentView, scope, query);
+    public long countFeed(ProposalFeedScope scope, String query) {
+        FeedFilter filter = feedFilter(scope, query);
         Long count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM proposals p " + filter.sql(),
                 Long.class,
@@ -361,10 +360,8 @@ public class ProposalRepository {
     public Optional<ProposalViewRecord> findDetail(
             UUID publicId,
             UUID viewerUserId,
-            boolean studentView,
             Instant now
     ) {
-        String accessPredicate = studentView ? "" : " AND p.workflow_status <> 'GATHERING_SUPPORT'";
         return jdbcTemplate.query("""
                         SELECT BIN_TO_UUID(p.public_id) AS public_id,
                                p.title,
@@ -387,7 +384,7 @@ public class ProposalRepository {
                         WHERE p.public_id = UUID_TO_BIN(?)
                           AND p.visibility_status = 'VISIBLE'
                           AND p.withdrawn_at IS NULL
-                        """ + accessPredicate,
+                        """,
                 this::mapProposalView,
                 Timestamp.from(now), Timestamp.from(now),
                 viewerUserId.toString(), publicId.toString()).stream().findFirst();
@@ -427,16 +424,21 @@ public class ProposalRepository {
         };
     }
 
-    private FeedFilter feedFilter(boolean studentView, ProposalFeedScope scope, String query) {
+    /**
+     * 조회자 역할로는 제안을 가리지 않는다. 교사도 동의 모집 중인 제안을 본다.
+     * 기능구현 명세서가 교사 대시보드에 50명 미만 제안을 요구하기 때문이다.
+     * 공개 제한과 삭제는 역할과 무관하게 항상 적용한다.
+     */
+    private FeedFilter feedFilter(ProposalFeedScope scope, String query) {
         List<String> predicates = new ArrayList<>();
         List<Object> parameters = new ArrayList<>();
         predicates.add("p.visibility_status = 'VISIBLE'");
         predicates.add("p.withdrawn_at IS NULL");
-        if (!studentView || scope == ProposalFeedScope.FORMAL_AGENDA) {
-            predicates.add("p.workflow_status <> 'GATHERING_SUPPORT'");
-        }
-        if (scope == ProposalFeedScope.REJECTED) {
-            predicates.add("p.workflow_status = 'REJECTED'");
+        switch (scope) {
+            case ALL -> { }
+            case FORMAL_AGENDA -> predicates.add("p.workflow_status <> 'GATHERING_SUPPORT'");
+            case REJECTED -> predicates.add("p.workflow_status = 'REJECTED'");
+            case GATHERING_SUPPORT -> predicates.add("p.workflow_status = 'GATHERING_SUPPORT'");
         }
         if (query != null && !query.isBlank()) {
             String escaped = "%" + escapeLike(query.strip()) + "%";

@@ -254,7 +254,7 @@ export interface paths {
         put?: never;
         /**
          * 분리 심의 사건 생성
-         * @description 현임 학생부장이 현재 세 직책 담당자를 사건 심의자로 고정합니다.
+         * @description 현임 학생부장교사가 현재 세 직책 담당자를 사건 심의자로 고정합니다.
          */
         post: operations["createCase"];
         delete?: never;
@@ -314,7 +314,7 @@ export interface paths {
         put?: never;
         /**
          * 작성자 신원 일회 확인
-         * @description 승인 사건의 학생부장이 최근 재인증 후 한 번만 확인할 수 있습니다.
+         * @description 승인 사건의 학생부장교사가 최근 재인증 후 한 번만 확인할 수 있습니다.
          */
         post: operations["reveal"];
         delete?: never;
@@ -656,7 +656,7 @@ export interface paths {
         };
         /**
          * 신고 사건함
-         * @description 현임 학생부장에게만 신고 내용과 제안 본문을 제공합니다.
+         * @description 현임 학생부장교사에게만 신고 내용과 제안 본문을 제공합니다.
          */
         get: operations["reports"];
         put?: never;
@@ -1195,9 +1195,9 @@ export interface components {
             existingCaseTypes?: string[];
         };
         CsrfToken: {
+            headerName?: string;
             parameterName?: string;
             token?: string;
-            headerName?: string;
         };
         /** @description 상태 변경 요청에 사용할 CSRF 토큰 */
         CsrfTokenResponse: {
@@ -1403,7 +1403,7 @@ export interface operations {
     list: {
         parameters: {
             query?: {
-                scope?: "ALL" | "FORMAL_AGENDA" | "REJECTED";
+                scope?: "ALL" | "FORMAL_AGENDA" | "REJECTED" | "GATHERING_SUPPORT";
                 sort?: "LATEST" | "OLDEST" | "MOST_SUPPORTED" | "LEAST_SUPPORTED";
                 query?: string;
                 page?: number;
