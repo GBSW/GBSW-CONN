@@ -2,6 +2,7 @@
 
 import type { components } from "@/lib/api-schema";
 import { ApiRequestError, apiGet, apiPost, errorMessage } from "@/lib/api-client";
+import { officeLabel } from "@/lib/roles";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
@@ -24,9 +25,6 @@ type IdentityReveal = components["schemas"]["IdentityRevealResponse"];
 
 const caseTypeLabels: Record<string, string> = { CONTENT_VISIBILITY: "공개 제한 심의", IDENTITY_REVEAL: "신원 확인 심의" };
 const statusLabels: Record<string, string> = { PENDING: "심의 중", APPROVED: "승인", REJECTED: "반려" };
-const officeLabels: Record<string, string> = {
-  STUDENT_AFFAIRS_TEACHER: "학생부장", STUDENT_COUNCIL_PRESIDENT: "학생회장", STUDENT_COUNCIL_VICE_PRESIDENT: "학생부회장",
-};
 const decisionLabels: Record<string, string> = { APPROVE: "승인", REJECT: "반대" };
 const dateTimeFormatter = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", dateStyle: "medium", timeStyle: "short" });
 const statusVariants: Record<string, "accent" | "success" | "error"> = { PENDING: "accent", APPROVED: "success", REJECTED: "error" };
@@ -69,7 +67,7 @@ export function ModerationCaseDetail({ publicId }: { publicId: string }) {
           <Text type="label">{caseTypeLabels[moderationCase.caseType ?? ""] ?? moderationCase.caseType} · {statusLabels[status] ?? status}</Text>
         </HStack>
         <Heading level={1} type="display-2">{moderationCase.proposalTitle ?? "제목 없는 제안"}</Heading>
-        <Text as="p" color="secondary">{officeLabels[moderationCase.viewerOffice ?? ""] ?? moderationCase.viewerOffice} 자격으로 심의 중</Text>
+        <Text as="p" color="secondary">{officeLabel(moderationCase.viewerOffice ?? "")} 자격으로 심의 중</Text>
       </VStack>
 
       <Section variant="muted" padding={6} aria-labelledby="evidence-title">
@@ -95,7 +93,7 @@ export function ModerationCaseDetail({ publicId }: { publicId: string }) {
             {(moderationCase.votes ?? []).map((vote, index) => (
               <ListItem
                 key={`${vote.office}-${vote.createdAt}-${index}`}
-                label={`${officeLabels[vote.office ?? ""] ?? vote.office} · ${decisionLabels[vote.decision ?? ""] ?? vote.decision}`}
+                label={`${officeLabel(vote.office ?? "")} · ${decisionLabels[vote.decision ?? ""] ?? vote.decision}`}
                 description={`${vote.reason} · ${formatDateTime(vote.createdAt)}`}
               />
             ))}
@@ -168,7 +166,7 @@ function IdentityRevealForm({ publicId, onRevealed }: { publicId: string; onReve
   return (
     <Section variant="muted" padding={6} aria-labelledby="identity-reveal-title">
       <VStack gap={4}>
-        <VStack gap={1}><Heading level={2} id="identity-reveal-title">작성자 신원 일회 확인</Heading><Text as="p" color="secondary">학생부장만 승인된 사건에서 사용할 수 있습니다. 비밀번호로 다시 인증한 뒤 결과가 한 번 표시됩니다.</Text></VStack>
+        <VStack gap={1}><Heading level={2} id="identity-reveal-title">작성자 신원 일회 확인</Heading><Text as="p" color="secondary">학생부장교사만 승인된 사건에서 사용할 수 있습니다. 비밀번호로 다시 인증한 뒤 결과가 한 번 표시됩니다.</Text></VStack>
         <form onSubmit={(event) => void reveal(event)}>
           <VStack gap={4}>
             <TextInput label="현재 비밀번호" type="password" value={password} onChange={setPassword} isRequired width="100%" />

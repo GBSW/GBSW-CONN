@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 export default function ModerationPage() {
   return (
-    <StaffAppShell>
+    <StaffAppShell requires="reviewer">
       <VStack className="page-frame motion-reveal" paddingBlock={4}>
         <ModerationConsole />
       </VStack>

@@ -7,6 +7,6 @@ public class ReviewerConfigurationException extends ApiException {
 
     public ReviewerConfigurationException() {
         super(HttpStatus.CONFLICT, "REVIEWER_CONFIGURATION_INVALID",
-                "학생부장·학생회장·학생부회장 현임자가 정확히 한 명씩 있어야 사건을 만들 수 있습니다.");
+                "학생부장교사·학생회장·학생부회장 현임자가 정확히 한 명씩 있어야 사건을 만들 수 있습니다.");
     }
 }

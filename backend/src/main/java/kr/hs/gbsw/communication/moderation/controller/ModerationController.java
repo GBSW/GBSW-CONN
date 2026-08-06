@@ -50,7 +50,7 @@ public class ModerationController {
     }
 
     @GetMapping("/reports")
-    @Operation(summary = "신고 사건함", description = "현임 학생부장에게만 신고 내용과 제안 본문을 제공합니다.")
+    @Operation(summary = "신고 사건함", description = "현임 학생부장교사에게만 신고 내용과 제안 본문을 제공합니다.")
     public List<ReportInboxItemResponse> reports(
             @AuthenticationPrincipal AuthPrincipal actor,
             @RequestParam(defaultValue = "50") @Min(1) @Max(100) int size
@@ -62,7 +62,7 @@ public class ModerationController {
 
     @PostMapping("/reports/{reportPublicId}/cases")
     @ResponseStatus(HttpStatus.CREATED)
-    @Operation(summary = "분리 심의 사건 생성", description = "현임 학생부장이 현재 세 직책 담당자를 사건 심의자로 고정합니다.")
+    @Operation(summary = "분리 심의 사건 생성", description = "현임 학생부장교사이 현재 세 직책 담당자를 사건 심의자로 고정합니다.")
     public ModerationCaseResponse createCase(
             @AuthenticationPrincipal AuthPrincipal actor,
             @PathVariable UUID reportPublicId,

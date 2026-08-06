@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 
 export default function OfficeAdministrationPage() {
   return (
-    <StaffAppShell>
+    <StaffAppShell requires="admin">
       <VStack className="page-frame motion-reveal" gap={6} paddingBlock={4}>
         <VStack gap={2} maxWidth="72ch">
           <Heading level={1} type="display-2">보직 관리</Heading>

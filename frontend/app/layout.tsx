@@ -13,7 +13,9 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="ko">
+    // data-scroll-behavior: globals.css의 smooth 스크롤을 Next.js에 알린다.
+    // 앵커 이동에서는 smooth를 유지하고 라우트 전환 중에는 라우터가 자동으로 끈다.
+    <html lang="ko" data-scroll-behavior="smooth">
       <body data-design-contract="astryx-neutral-topnav-row-feed-system-mode">
         {/* Design contract: A stryx Neutral, system light/dark, public TopNav, staff SideNav, dense record rows. */}
         <AstryxProvider>{children}</AstryxProvider>

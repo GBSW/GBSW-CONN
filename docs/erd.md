@@ -63,7 +63,7 @@ erDiagram
 | `moderation_reviewer_snapshots` | 사건 당시 3인 심의자 | 사건+보직 고유, 정확히 3명은 생성 서비스에서 검증 |
 | `moderation_votes` | 심의자 1회 승인/거부 | 심의자 스냅샷당 최대 1표 |
 | `proposal_visibility_history` | 심의에 따른 공개 상태 변경 | 사건당 최대 1행, 원문 삭제 없이 전후 상태 보존 |
-| `identity_reveal_records` | 실제 신원 열람 감사 | 승인 사건, 학생부장, 재인증을 서비스에서 검증 |
+| `identity_reveal_records` | 실제 신원 열람 감사 | 승인 사건, 학생부장교사, 재인증을 서비스에서 검증 |
 | `private_cases` | 별도 비공개 고충 데이터 | 공개 제안과 FK 공유 금지 |
 | `finance_disclosures` | 예산/실제 집행 공개 | 금액 종류 allowlist, 검증 상태 |
 | `audit_logs` | 보안·업무 사건 추가 기록 | 민감 원문 금지, 앱의 update/delete 금지 |

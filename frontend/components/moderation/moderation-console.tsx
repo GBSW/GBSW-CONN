@@ -2,6 +2,7 @@
 
 import type { components } from "@/lib/api-schema";
 import { ApiRequestError, apiGet, apiPost, errorMessage } from "@/lib/api-client";
+import { officeLabel } from "@/lib/roles";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
@@ -23,9 +24,6 @@ type ModerationCase = components["schemas"]["ModerationCaseResponse"];
 
 const caseTypeLabels: Record<string, string> = { CONTENT_VISIBILITY: "공개 제한 심의", IDENTITY_REVEAL: "신원 확인 심의" };
 const statusLabels: Record<string, string> = { PENDING: "심의 중", APPROVED: "승인", REJECTED: "반려" };
-const officeLabels: Record<string, string> = {
-  STUDENT_AFFAIRS_TEACHER: "학생부장", STUDENT_COUNCIL_PRESIDENT: "학생회장", STUDENT_COUNCIL_VICE_PRESIDENT: "학생부회장",
-};
 const statusVariants: Record<string, "accent" | "success" | "error"> = { PENDING: "accent", APPROVED: "success", REJECTED: "error" };
 const dateTimeFormatter = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", dateStyle: "medium", timeStyle: "short" });
 
@@ -125,7 +123,7 @@ export function ModerationConsole() {
                         <Text type="supporting" weight="medium">{caseTypeLabels[moderationCase.caseType ?? ""] ?? moderationCase.caseType} · {statusLabels[status] ?? status}</Text>
                       </HStack>
                       <Heading level={3}>{moderationCase.proposalTitle ?? "제목 없는 제안"}</Heading>
-                      <Text as="p" color="secondary">{officeLabels[moderationCase.viewerOffice ?? ""] ?? moderationCase.viewerOffice} 자격 · {(moderationCase.votes ?? []).length}/3 의결</Text>
+                      <Text as="p" color="secondary">{officeLabel(moderationCase.viewerOffice ?? "")} 자격 · {(moderationCase.votes ?? []).length}/3 의결</Text>
                     </VStack>
                   }
                   endContent={<Button label="사건 상세" href={moderationCase.publicId ? `/moderation/${moderationCase.publicId}` : undefined} variant="secondary" size="sm" />}

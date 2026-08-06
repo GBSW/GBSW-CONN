@@ -1,7 +1,5 @@
 "use client";
 
-import type { components } from "@/lib/api-schema";
-import { ApiRequestError, apiGet } from "@/lib/api-client";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
@@ -10,43 +8,36 @@ import { List, ListItem } from "@astryxdesign/core/List";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
-import { useEffect, useState } from "react";
-
-type CurrentUser = components["schemas"]["CurrentUserResponse"];
+import { useCurrentUser } from "@/lib/current-user";
+import { isReviewer, isStudent, isSuperAdmin, isTeacher } from "@/lib/roles";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
 export function DashboardHome() {
-  const [user, setUser] = useState<CurrentUser | null>(null);
-  const [state, setState] = useState<"loading" | "ready" | "signed-out" | "error">("loading");
+  const router = useRouter();
+  const { user, status } = useCurrentUser();
+
+  const student = isStudent(user);
+  const teacher = isTeacher(user);
+  const admin = isSuperAdmin(user);
+  const reviewer = isReviewer(user);
+
+  // 슈퍼 어드민에게는 별도 대시보드를 두지 않는다. 다만 학생이나 교사 역할을
+  // 함께 가진 계정은 본인 활동을 확인해야 하므로 공통 대시보드에 남긴다.
+  const adminOnly = admin && !student && !teacher;
 
   useEffect(() => {
-    let active = true;
-    apiGet<CurrentUser>("/api/v1/auth/me")
-      .then((currentUser) => {
-        if (!active) return;
-        setUser(currentUser);
-        setState("ready");
-      })
-      .catch((error: unknown) => {
-        if (!active) return;
-        const signedOut = error instanceof ApiRequestError
-          && ["AUTHENTICATION_REQUIRED", "SESSION_INVALIDATED"].includes(error.code);
-        setState(signedOut ? "signed-out" : "error");
-      });
-    return () => { active = false; };
-  }, []);
+    if (status === "ready" && adminOnly) router.replace("/admin");
+  }, [adminOnly, router, status]);
 
-  if (state === "loading") return <Spinner size="lg" label="대시보드를 불러오고 있습니다…" />;
-  if (state === "signed-out") return <EmptyState title="로그인이 필요합니다" actions={<Button label="로그인" href="/login" variant="primary" />} headingLevel={1} />;
-  if (state === "error" || !user) return <Banner status="error" title="대시보드를 불러오지 못했습니다" description="잠시 후 다시 시도해 주세요." />;
-
-  const student = user.roles.includes("STUDENT");
-  const teacher = user.roles.includes("TEACHER");
-  const admin = user.roles.includes("SUPER_ADMIN");
-  const reviewer = user.offices.some((office) => [
-    "STUDENT_AFFAIRS_TEACHER",
-    "STUDENT_COUNCIL_PRESIDENT",
-    "STUDENT_COUNCIL_VICE_PRESIDENT",
-  ].includes(office));
+  if (status === "loading") return <Spinner size="lg" label="대시보드를 불러오고 있습니다…" />;
+  if (status === "signed-out") {
+    return <EmptyState title="로그인이 필요합니다" actions={<Button label="로그인" href="/login" variant="primary" />} headingLevel={1} />;
+  }
+  if (status === "error" || !user) {
+    return <Banner status="error" title="대시보드를 불러오지 못했습니다" description="잠시 후 다시 시도해 주세요." />;
+  }
+  if (adminOnly) return <Spinner size="lg" label="관리 화면으로 이동하고 있습니다…" />;
 
   return (
     <VStack gap={8}>

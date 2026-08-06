@@ -76,7 +76,7 @@ public class IdentityRevealService {
                     || moderationCase.status() != ModerationCaseStatus.APPROVED
                     || moderationCase.viewerOffice() != OfficeType.STUDENT_AFFAIRS_TEACHER) {
                 throw new IdentityRevealUnavailableException(
-                        "승인된 신원 확인 사건의 학생부장만 신원을 확인할 수 있습니다.");
+                        "승인된 신원 확인 사건의 학생부장교사만 신원을 확인할 수 있습니다.");
             }
             if (repository.hasIdentityReveal(moderationCase.id())) {
                 throw new IdentityRevealUnavailableException("이 사건의 신원은 이미 한 번 확인되었습니다.");
