@@ -65,6 +65,16 @@ test("학생이 제안 피드·작성·상세 기록을 확인한다", async ({ 
   await expect(page.getByText("학교 공식 답변과 실행 현황")).toBeVisible();
   await expect(page.getByText("공식 답변과 실행 결과를 확인했습니다.")).toBeVisible();
 
+  // 진행 이력은 전이 시점의 유효 동의 수를 숫자로 보여야 한다.
+  // 정식 안건 전환·검토 시작·공식 답변을 거친 제안에서 확인한다.
+  const statusHistory = page.getByRole("region", { name: "진행 이력" });
+  await expect(statusHistory).toBeVisible();
+  const historyText = await statusHistory.innerText();
+  expect(historyText).toMatch(/전환 당시 유효 동의 \d+명/);
+  for (const placeholder of ["null", "undefined", "NaN"]) {
+    expect(historyText, `진행 이력에 ${placeholder}가 노출됨`).not.toContain(placeholder);
+  }
+
   await page.goto(`/proposals/${data.draftId}`);
   await expect(page.getByRole("heading", { level: 1, name: data.draftTitle })).toBeVisible();
   await expect(page.getByText(data.draftComment)).toBeVisible();

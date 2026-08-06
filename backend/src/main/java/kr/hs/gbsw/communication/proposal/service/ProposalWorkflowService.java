@@ -204,8 +204,11 @@ public class ProposalWorkflowService {
         if (!workflowRepository.transition(proposal.id(), expected, next, now)) {
             throw new ProposalStateConflictException("다른 요청이 먼저 상태를 변경했습니다. 새로고침 후 다시 시도해 주세요.");
         }
+        // 이력은 전이 당시의 유효 동의 수를 함께 남긴다. 이 값이 비면 진행 이력에서
+        // 동의 규모를 알 수 없고 화면에도 표시할 것이 없다.
+        int supportCount = proposalRepository.countValidSupports(proposal.id(), now);
         proposalRepository.insertStatusHistory(
-                proposal.id(), expected, next, actor.userId(), null, reason, now);
+                proposal.id(), expected, next, actor.userId(), supportCount, reason, now);
         auditLogRepository.appendForTarget(
                 actor.userId(), eventType, "PROPOSAL", proposal.publicId(),
                 "SUCCESS", traceId, now);
