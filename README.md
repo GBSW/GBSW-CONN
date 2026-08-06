@@ -16,7 +16,7 @@
 ## 2. 사용자와 권한 요약
 
 - `STUDENT`: 공개 제안 작성·조회·동의와 비공개 고충 제출
-- `TEACHER`: 50명 이상 정식 안건의 검토와 공식 답변. 50명 미만 제안은 기본적으로 조회 불가
+- `TEACHER`: 정식 안건의 검토와 공식 답변. 동의를 모으는 중인 제안도 함께 조회할 수 있으나 익명 작성자의 신원은 볼 수 없음
 - `SUPER_ADMIN`: 계정, 역할, 임기 기반 보직, 운영 설정 관리. 익명 신원 열람 권한은 없음
 - `STUDENT_AFFAIRS_TEACHER`, `STUDENT_COUNCIL_PRESIDENT`, `STUDENT_COUNCIL_VICE_PRESIDENT`: 임기 이력이 있는 보직. 사건 생성 시점의 세 사람을 심의자로 고정
 

@@ -62,7 +62,7 @@ public class ModerationController {
 
     @PostMapping("/reports/{reportPublicId}/cases")
     @ResponseStatus(HttpStatus.CREATED)
-    @Operation(summary = "분리 심의 사건 생성", description = "현임 학생부장교사이 현재 세 직책 담당자를 사건 심의자로 고정합니다.")
+    @Operation(summary = "분리 심의 사건 생성", description = "현임 학생부장교사가 현재 세 직책 담당자를 사건 심의자로 고정합니다.")
     public ModerationCaseResponse createCase(
             @AuthenticationPrincipal AuthPrincipal actor,
             @PathVariable UUID reportPublicId,

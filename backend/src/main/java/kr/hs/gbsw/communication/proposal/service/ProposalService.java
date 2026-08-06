@@ -109,26 +109,25 @@ public class ProposalService {
             int page,
             int size
     ) {
-        boolean studentView = requireReader(viewer);
+        requireReader(viewer);
         String normalizedQuery = query == null || query.isBlank() ? null : query.strip();
         Instant now = clock.instant();
         long offset = (long) page * size;
         return ProposalPageResponse.from(
                 repository.findFeed(
-                        viewer.userId(), studentView, scope, normalizedQuery, sort,
+                        viewer.userId(), scope, normalizedQuery, sort,
                         now, size, offset),
                 properties.supportThreshold(),
                 page,
                 size,
-                repository.countFeed(studentView, scope, normalizedQuery));
+                repository.countFeed(scope, normalizedQuery));
     }
 
     @Transactional(readOnly = true)
     public ProposalDetailResponse get(AuthPrincipal viewer, UUID publicId) {
-        boolean studentView = requireReader(viewer);
+        requireReader(viewer);
         Instant now = clock.instant();
-        ProposalViewRecord proposal = repository.findDetail(
-                        publicId, viewer.userId(), studentView, now)
+        ProposalViewRecord proposal = repository.findDetail(publicId, viewer.userId(), now)
                 .orElseThrow(ProposalNotFoundException::new);
         boolean viewerCanManage = viewer.authorities().contains("ROLE_TEACHER")
                 && workflowRepository.isCurrentAssignedTeacherByPublicId(publicId, viewer.userId(), now);
@@ -312,12 +311,10 @@ public class ProposalService {
         }
     }
 
-    private boolean requireReader(AuthPrincipal principal) {
-        if (principal.authorities().contains("ROLE_STUDENT")) {
-            return true;
-        }
-        if (principal.authorities().contains("ROLE_TEACHER")) {
-            return false;
+    private void requireReader(AuthPrincipal principal) {
+        if (principal.authorities().contains("ROLE_STUDENT")
+                || principal.authorities().contains("ROLE_TEACHER")) {
+            return;
         }
         throw new AccessDeniedException("Proposal feed requires a student or teacher role");
     }
