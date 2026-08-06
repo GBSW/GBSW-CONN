@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -32,9 +33,8 @@ const sharedEnvironment = {
   E2E_MYSQL_PASSWORD: databasePassword,
   E2E_MYSQL_ROOT_PASSWORD: rootPassword,
 };
-const backendEnvironment = {
+const backendEnvironment = applyJavaHome({
   ...sharedEnvironment,
-  JAVA_HOME: process.env.JAVA_HOME ?? "/opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home",
   DB_URL: `jdbc:mysql://127.0.0.1:${mysqlPort}/school_communication_e2e?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC`,
   DB_USERNAME: "school_e2e",
   DB_PASSWORD: databasePassword,
@@ -49,7 +49,7 @@ const backendEnvironment = {
   PROPOSAL_IDENTITY_KEY_BASE64: randomBytes(32).toString("base64"),
   PROPOSAL_IDENTITY_KEY_VERSION: "1",
   PROPOSAL_SUPPORT_THRESHOLD: "50",
-};
+});
 const children = [];
 let composeStarted = false;
 
@@ -97,6 +97,24 @@ try {
   ]);
   await removeGeneratedDevOutput();
   process.stderr.write(`E2E diagnostic directory: ${temporaryDir}\n`);
+}
+
+/**
+ * 백엔드 환경의 JAVA_HOME을 실제로 존재하는 경로로만 맞춘다.
+ *
+ * 존재하지 않는 경로가 들어 있으면 gradlew가 툴체인을 보기도 전에 중단된다.
+ * 쓸 수 있는 후보가 없으면 상속된 값까지 지운다. JAVA_HOME이 없으면 gradlew는
+ * PATH의 java로 실행되고 컴파일용 JDK는 Gradle 툴체인이 고른다.
+ */
+function applyJavaHome(environment) {
+  const candidates = [
+    process.env.JAVA_HOME,
+    "/opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home",
+  ];
+  const javaHome = candidates.find((candidate) => candidate && existsSync(candidate));
+  if (javaHome) environment.JAVA_HOME = javaHome;
+  else delete environment.JAVA_HOME;
+  return environment;
 }
 
 function run(command, args, cwd, env) {

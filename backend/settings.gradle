@@ -1,1 +1,8 @@
+// build.gradle이 요구하는 Java 25 툴체인을 찾지 못하면 Gradle이 컴파일 태스크의
+// 의존성조차 계산하지 못한다. 설치된 JDK가 없을 때만 자동으로 내려받는다.
+// JDK 25가 이미 있는 환경(CI의 setup-java 등)에서는 그대로 재사용한다.
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
 rootProject.name = 'school-communication-backend'
