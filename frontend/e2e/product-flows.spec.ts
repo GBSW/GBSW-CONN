@@ -45,6 +45,15 @@ test("학생이 제안 피드·작성·상세 기록을 확인한다", async ({ 
   await expect(page.getByRole("heading", { level: 1, name: "함께 바꿀 제안" })).toBeVisible();
   await expect(page.getByText(data.proposalTitle)).toBeVisible();
   await qaScreenshot(page, "proposals-desktop.png");
+
+  // 필터와 정렬 선택지가 명세대로 제공되어야 한다.
+  await page.getByRole("combobox", { name: "범위" }).click();
+  await expect(page.getByRole("option")).toHaveText(["전체 제안", "정식 안건", "채택 안 됨"]);
+  await page.keyboard.press("Escape");
+  await page.getByRole("combobox", { name: "정렬" }).click();
+  await expect(page.getByRole("option")).toHaveText(["최신순", "날짜순", "동의 많은 순", "동의 적은 순"]);
+  await page.keyboard.press("Escape");
+
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByTestId("proposal-support-mobile").first()).toBeVisible();
   await assertNoHorizontalOverflow(page);

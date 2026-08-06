@@ -1403,8 +1403,8 @@ export interface operations {
     list: {
         parameters: {
             query?: {
-                scope?: "ALL" | "FORMAL_AGENDA";
-                sort?: "LATEST" | "MOST_SUPPORTED";
+                scope?: "ALL" | "FORMAL_AGENDA" | "REJECTED";
+                sort?: "LATEST" | "OLDEST" | "MOST_SUPPORTED" | "LEAST_SUPPORTED";
                 query?: string;
                 page?: number;
                 size?: number;
