@@ -123,6 +123,8 @@ cp .env.example .env
 | `ACTIVATION_CODE_TTL`, `PASSWORD_RESET_CODE_TTL`, `REAUTHENTICATION_TTL` | 개인별 일회 코드 만료와 민감 작업 재인증 유효 시간 |
 | `MINIMUM_PASSWORD_LENGTH`, `MAXIMUM_PASSWORD_LENGTH` | 비밀번호 길이 정책 |
 | `THROTTLE_FINGERPRINT_SECRET` | 계정/IP 차단 식별자를 HMAC 처리하는 32자 이상 운영 비밀 |
+| `PROPOSAL_SUPPORT_THRESHOLD` | 정식 안건으로 승격되는 유효 동의 수 |
+| `PROPOSAL_REPORT_HIDE_THRESHOLD` | 제안을 임시로 가리는 유효 신고 수 |
 
 운영 비밀은 `.env`나 Git에 저장하지 않는다.
 
