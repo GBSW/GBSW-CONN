@@ -109,7 +109,7 @@ test("교사·관리자 업무 화면이 실제 기록을 표시한다", async (
   await qaScreenshot(admin, "admin-proposals-desktop.png");
 });
 
-test("고정 심의자가 승인 사건을 보고 학생부장이 신원을 한 번만 확인한다", async ({ browser }) => {
+test("고정 심의자가 승인 사건을 보고 신원을 확인한다", async ({ browser }) => {
   const data = await seedData();
   const president = await rolePage(browser, "president.json");
   await president.goto("/moderation");
@@ -122,7 +122,7 @@ test("고정 심의자가 승인 사건을 보고 학생부장이 신원을 한 
   await affairs.goto(`/moderation/${data.identityCaseId}`);
   await affairs.getByLabel("현재 비밀번호").fill(data.password);
   await affairs.getByLabel("확인 사유").fill("Playwright E2E 일회 확인 검증");
-  await affairs.getByRole("button", { name: "재인증하고 한 번 확인" }).click();
+  await affairs.getByRole("button", { name: "재인증하고 확인" }).click();
   await expect(affairs.getByRole("heading", { name: /확인된 작성자/ })).toBeVisible();
   await expect(affairs.getByText("e2e.student.00")).toBeVisible();
 });
