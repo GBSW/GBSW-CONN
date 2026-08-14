@@ -26,21 +26,21 @@ spring:
 
 server:
   port: ${BACKEND_PORT:8080}
-  forward-headers-strategy: native
+  forward-headers-strategy: none
   servlet:
     session:
       cookie:
         name: SESSION
         http-only: true
-        secure: ${SESSION_COOKIE_SECURE:false}
+        secure: ${SESSION_COOKIE_SECURE:true}
         same-site: lax
   max-http-request-header-size: 16KB
 
 springdoc:
   api-docs:
-    enabled: ${OPENAPI_ENABLED:true}
+    enabled: ${OPENAPI_ENABLED:false}
   swagger-ui:
-    enabled: ${SWAGGER_UI_ENABLED:true}
+    enabled: ${SWAGGER_UI_ENABLED:false}
     path: /swagger-ui.html
     csrf:
       enabled: true
@@ -57,7 +57,7 @@ management:
 app:
   security:
     cookie:
-      secure: ${SESSION_COOKIE_SECURE:false}
+      secure: ${SESSION_COOKIE_SECURE:true}
       same-site: Lax
     rate-limit:
       login-failures-before-delay: ${LOGIN_FAILURES_BEFORE_DELAY:5}
@@ -76,6 +76,22 @@ app:
   identity-vault:
     key-base64: ${PROPOSAL_IDENTITY_KEY_BASE64}
     key-version: ${PROPOSAL_IDENTITY_KEY_VERSION:1}
+  proposal-ownership:
+    key-base64: ${PROPOSAL_OWNERSHIP_KEY_BASE64}
+    key-version: ${PROPOSAL_OWNERSHIP_KEY_VERSION:1}
+  deployment:
+    production: ${APP_DEPLOYMENT_PRODUCTION:false}
+    trusted-client-address-header: ${TRUSTED_CLIENT_ADDRESS_HEADER:X-Gbsw-Client-IP}
+    request-limiter-max-entries: ${REQUEST_LIMITER_MAX_ENTRIES:50000}
+    request-limiter-idle-ttl: ${REQUEST_LIMITER_IDLE_TTL:PT15M}
+    authentication-requests-per-minute: ${AUTHENTICATION_REQUESTS_PER_MINUTE:30}
+    credential-verification-concurrency: ${CREDENTIAL_VERIFICATION_CONCURRENCY:4}
+    unknown-account-max-entries: ${UNKNOWN_ACCOUNT_MAX_ENTRIES:50000}
+    unknown-account-ttl: ${UNKNOWN_ACCOUNT_TTL:PT15M}
+    persistent-throttle-ttl: ${PERSISTENT_THROTTLE_TTL:PT24H}
+    auth-audit-retention: ${AUTH_AUDIT_RETENTION:PT720H}
+    maintenance-batch-size: ${SECURITY_MAINTENANCE_BATCH_SIZE:1000}
+    maintenance-interval: ${SECURITY_MAINTENANCE_INTERVAL:PT1H}
 
 logging:
   pattern:

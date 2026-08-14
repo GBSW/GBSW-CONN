@@ -15,7 +15,7 @@ export default function AdminPage() {
       <VStack className="page-frame motion-reveal" gap={6} paddingBlock={4}>
         <VStack gap={2} maxWidth="72ch">
           <Heading level={1} type="display-2">계정 관리</Heading>
-          <Text as="p" color="secondary">기존 계정을 찾고 코드 발급, 상태, 역할 임기를 기능별로 펼쳐 관리합니다.</Text>
+          <Text as="p" color="secondary">민감한 계정·역할 변경은 2인 승인으로 실행되며 자격증명 원문은 관리자에게 표시되지 않습니다.</Text>
         </VStack>
         <AdminConsole mode="accounts" />
       </VStack>

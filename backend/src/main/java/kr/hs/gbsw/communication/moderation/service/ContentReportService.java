@@ -52,7 +52,7 @@ public class ContentReportService {
             throw new AccessDeniedException("Content reporting requires a current student or teacher role");
         }
 
-        LockedProposal proposal = proposalRepository.lockByPublicId(proposalPublicId)
+        LockedProposal proposal = proposalRepository.lockReportableByPublicId(proposalPublicId)
                 .orElseThrow(ProposalNotFoundException::new);
         if (proposal.visibilityStatus() != ProposalVisibilityStatus.VISIBLE
                 || (!student && proposal.workflowStatus() == ProposalWorkflowStatus.GATHERING_SUPPORT)) {

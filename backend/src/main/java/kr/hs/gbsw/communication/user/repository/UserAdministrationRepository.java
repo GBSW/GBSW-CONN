@@ -187,6 +187,86 @@ public class UserAdministrationRepository {
         return count != null && count == 1;
     }
 
+    public boolean hasOverlappingRoleAssignment(
+            UUID userId,
+            AccountRole role,
+            Instant startsAt,
+            Instant endsAt
+    ) {
+        String endPredicate = endsAt == null ? "" : " AND starts_at < ?";
+        List<Object> parameters = new java.util.ArrayList<>();
+        parameters.add(userId.toString());
+        parameters.add(role.name());
+        if (endsAt != null) {
+            parameters.add(Timestamp.from(endsAt));
+        }
+        parameters.add(Timestamp.from(startsAt));
+        Integer count = jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM role_assignments
+                        WHERE user_id = UUID_TO_BIN(?) AND role_type = ?
+                        """ + endPredicate + """
+                          AND (ends_at IS NULL OR ends_at > ?)
+                        """,
+                Integer.class, parameters.toArray());
+        return count != null && count > 0;
+    }
+
+    public boolean hasOverlappingModerationOfficeAssignment(
+            UUID userId,
+            Instant startsAt,
+            Instant endsAt
+    ) {
+        return hasOverlappingOfficeAssignment(userId, null, startsAt, endsAt);
+    }
+
+    public boolean hasOverlappingOtherModerationOfficeAssignment(
+            UUID userId,
+            OfficeType office,
+            Instant startsAt,
+            Instant endsAt
+    ) {
+        return hasOverlappingOfficeAssignment(userId, office, startsAt, endsAt);
+    }
+
+    public void lockModerationOfficeSeat(OfficeType office) {
+        List<String> seats = jdbcTemplate.queryForList("""
+                        SELECT office_type FROM moderation_office_seats
+                        WHERE office_type = ?
+                        FOR UPDATE
+                        """,
+                String.class, office.name());
+        if (seats.size() != 1) {
+            throw new IllegalStateException("Moderation office seat is not configured");
+        }
+    }
+
+    private boolean hasOverlappingOfficeAssignment(
+            UUID userId,
+            OfficeType excludedOffice,
+            Instant startsAt,
+            Instant endsAt
+    ) {
+        String excludedPredicate = excludedOffice == null ? "" : " AND office_type <> ?";
+        String endPredicate = endsAt == null ? "" : " AND starts_at < ?";
+        List<Object> parameters = new java.util.ArrayList<>();
+        parameters.add(userId.toString());
+        if (excludedOffice != null) {
+            parameters.add(excludedOffice.name());
+        }
+        if (endsAt != null) {
+            parameters.add(Timestamp.from(endsAt));
+        }
+        parameters.add(Timestamp.from(startsAt));
+        Integer count = jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM office_assignments
+                        WHERE user_id = UUID_TO_BIN(?)
+                        """ + excludedPredicate + endPredicate + """
+                          AND (ends_at IS NULL OR ends_at > ?)
+                        """,
+                Integer.class, parameters.toArray());
+        return count != null && count > 0;
+    }
+
     public boolean hasOfficeAfterRoleEnd(UUID userId, AccountRole role, Instant effectiveEnd) {
         List<String> compatibleOffices = switch (role) {
             case STUDENT -> List.of(

@@ -11,6 +11,9 @@ server:
         secure: true
 
 app:
+  deployment:
+    production: true
+    trusted-proxy-cidrs: ${TRUSTED_PROXY_CIDRS}
   security:
     cookie:
       secure: true

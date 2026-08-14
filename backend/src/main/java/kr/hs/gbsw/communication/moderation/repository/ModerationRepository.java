@@ -82,6 +82,46 @@ public class ModerationRepository {
         return active != null && active == 1;
     }
 
+    public boolean isEligibleIdentityRevealActor(UUID userId, Instant now) {
+        Integer eligible = jdbcTemplate.queryForObject("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM users actor
+                            WHERE actor.id = UUID_TO_BIN(?)
+                              AND actor.account_status = 'ACTIVE'
+                              AND EXISTS (
+                                  SELECT 1 FROM role_assignments teacher_role
+                                  WHERE teacher_role.user_id = actor.id
+                                    AND teacher_role.role_type = 'TEACHER'
+                                    AND teacher_role.starts_at <= ?
+                                    AND (teacher_role.ends_at IS NULL OR teacher_role.ends_at > ?)
+                              )
+                              AND NOT EXISTS (
+                                  SELECT 1 FROM role_assignments admin_role
+                                  WHERE admin_role.user_id = actor.id
+                                    AND admin_role.role_type = 'SUPER_ADMIN'
+                                    AND admin_role.starts_at <= ?
+                                    AND (admin_role.ends_at IS NULL OR admin_role.ends_at > ?)
+                              )
+                              AND NOT EXISTS (
+                                  SELECT 1 FROM office_assignments prohibited_office
+                                  WHERE prohibited_office.user_id = actor.id
+                                    AND prohibited_office.office_type IN (
+                                        'STUDENT_COUNCIL_PRESIDENT',
+                                        'STUDENT_COUNCIL_VICE_PRESIDENT'
+                                    )
+                                    AND prohibited_office.starts_at <= ?
+                                    AND (prohibited_office.ends_at IS NULL OR prohibited_office.ends_at > ?)
+                              )
+                        )
+                        """,
+                Integer.class,
+                userId.toString(),
+                Timestamp.from(now), Timestamp.from(now),
+                Timestamp.from(now), Timestamp.from(now),
+                Timestamp.from(now), Timestamp.from(now));
+        return eligible != null && eligible == 1;
+    }
+
     public List<ContentReportRecord> findInboxReports(int size) {
         return jdbcTemplate.query("""
                         SELECT BIN_TO_UUID(report.public_id) AS public_id,

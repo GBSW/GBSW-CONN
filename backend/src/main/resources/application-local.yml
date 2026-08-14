@@ -1,0 +1,18 @@
+server:
+  servlet:
+    session:
+      cookie:
+        secure: false
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+
+app:
+  deployment:
+    production: false
+  security:
+    cookie:
+      secure: false

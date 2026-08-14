@@ -16,6 +16,7 @@ import kr.hs.gbsw.communication.auth.exception.AuthenticationFailedException;
 import kr.hs.gbsw.communication.auth.exception.AuthenticationThrottledException;
 import kr.hs.gbsw.communication.auth.exception.PasswordResetFailedException;
 import kr.hs.gbsw.communication.auth.repository.AuthRepository;
+import kr.hs.gbsw.communication.common.security.CredentialVerificationLimiter;
 import kr.hs.gbsw.communication.user.domain.AccountStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -29,6 +30,7 @@ public class AuthService {
     private final AuthenticationThrottleService throttleService;
     private final PasswordPolicy passwordPolicy;
     private final PasswordEncoder passwordEncoder;
+    private final CredentialVerificationLimiter credentialVerificationLimiter;
     private final Clock clock;
     private final String dummyPasswordHash;
 
@@ -38,6 +40,7 @@ public class AuthService {
             AuthenticationThrottleService throttleService,
             PasswordPolicy passwordPolicy,
             PasswordEncoder passwordEncoder,
+            CredentialVerificationLimiter credentialVerificationLimiter,
             Clock clock
     ) {
         this.authRepository = authRepository;
@@ -45,6 +48,7 @@ public class AuthService {
         this.throttleService = throttleService;
         this.passwordPolicy = passwordPolicy;
         this.passwordEncoder = passwordEncoder;
+        this.credentialVerificationLimiter = credentialVerificationLimiter;
         this.clock = clock;
         byte[] dummySecret = new byte[32];
         new SecureRandom().nextBytes(dummySecret);
@@ -59,7 +63,12 @@ public class AuthService {
         Instant now = clock.instant();
         Optional<AccountRecord> candidate = authRepository.findByLoginId(loginId);
         try {
-            throttleService.assertAllowed(ThrottleOperation.LOGIN, loginId, remoteAddress, now);
+            throttleService.assertAllowed(
+                    ThrottleOperation.LOGIN,
+                    candidate.map(AccountRecord::id).orElse(null),
+                    loginId,
+                    remoteAddress,
+                    now);
         } catch (AuthenticationThrottledException exception) {
             appendAudit(candidate.orElse(null), "AUTH_LOGIN", "BLOCKED", traceId, now);
             throw exception;
@@ -69,19 +78,24 @@ public class AuthService {
         String storedHash = account != null && account.hasCredentials()
                 ? account.passwordHash()
                 : dummyPasswordHash;
-        boolean passwordMatches = passwordEncoder.matches(password, storedHash);
+        boolean passwordMatches = matches(password, storedHash);
         boolean usable = account != null
                 && account.status() == AccountStatus.ACTIVE
                 && account.hasCredentials()
                 && passwordMatches;
 
         if (!usable) {
-            throttleService.recordFailure(ThrottleOperation.LOGIN, loginId, remoteAddress, now);
+            throttleService.recordFailure(
+                    ThrottleOperation.LOGIN,
+                    account == null ? null : account.id(),
+                    loginId,
+                    remoteAddress,
+                    now);
             appendAudit(account, "AUTH_LOGIN", "FAILURE", traceId, now);
             throw new AuthenticationFailedException();
         }
 
-        throttleService.clear(ThrottleOperation.LOGIN, loginId, remoteAddress);
+        throttleService.clear(ThrottleOperation.LOGIN, account.id(), loginId, remoteAddress);
         appendAudit(account, "AUTH_LOGIN", "SUCCESS", traceId, now);
         return authRepository.toPrincipal(account, now, now);
     }
@@ -101,6 +115,7 @@ public class AuthService {
         try {
             throttleService.assertAllowed(
                     ThrottleOperation.REAUTHENTICATION,
+                    account == null ? null : account.id(),
                     currentPrincipal.loginId(),
                     remoteAddress,
                     now);
@@ -112,7 +127,7 @@ public class AuthService {
         String storedHash = account != null && account.hasCredentials()
                 ? account.passwordHash()
                 : dummyPasswordHash;
-        boolean passwordMatches = passwordEncoder.matches(password, storedHash);
+        boolean passwordMatches = matches(password, storedHash);
         boolean usable = account != null
                 && account.id().equals(currentPrincipal.userId())
                 && account.status() == AccountStatus.ACTIVE
@@ -122,6 +137,7 @@ public class AuthService {
         if (!usable) {
             throttleService.recordFailure(
                     ThrottleOperation.REAUTHENTICATION,
+                    account == null ? null : account.id(),
                     currentPrincipal.loginId(),
                     remoteAddress,
                     now);
@@ -131,6 +147,7 @@ public class AuthService {
 
         throttleService.clear(
                 ThrottleOperation.REAUTHENTICATION,
+                account.id(),
                 currentPrincipal.loginId(),
                 remoteAddress);
         appendAudit(account, "AUTH_REAUTHENTICATION", "SUCCESS", traceId, now);
@@ -152,7 +169,12 @@ public class AuthService {
         Instant now = clock.instant();
         AccountRecord account = authRepository.lockByLoginId(loginId).orElse(null);
         try {
-            throttleService.assertAllowed(ThrottleOperation.ACTIVATION, loginId, remoteAddress, now);
+            throttleService.assertAllowed(
+                    ThrottleOperation.ACTIVATION,
+                    account == null ? null : account.id(),
+                    loginId,
+                    remoteAddress,
+                    now);
         } catch (AuthenticationThrottledException exception) {
             appendAudit(account, "AUTH_ACTIVATION", "BLOCKED", traceId, now);
             throw exception;
@@ -168,15 +190,20 @@ public class AuthService {
                 && matchedCode != null;
 
         if (!usable) {
-            throttleService.recordFailure(ThrottleOperation.ACTIVATION, loginId, remoteAddress, now);
+            throttleService.recordFailure(
+                    ThrottleOperation.ACTIVATION,
+                    account == null ? null : account.id(),
+                    loginId,
+                    remoteAddress,
+                    now);
             appendAudit(account, "AUTH_ACTIVATION", "FAILURE", traceId, now);
             throw new ActivationFailedException();
         }
 
         authRepository.markActivationCodeUsed(matchedCode.id(), now);
         authRepository.revokeOtherActivationCodes(account.id(), matchedCode.id(), now);
-        authRepository.activateAccount(account.id(), passwordEncoder.encode(password), now);
-        throttleService.clear(ThrottleOperation.ACTIVATION, loginId, remoteAddress);
+        authRepository.activateAccount(account.id(), encode(password), now);
+        throttleService.clear(ThrottleOperation.ACTIVATION, account.id(), loginId, remoteAddress);
         appendAudit(account, "AUTH_ACTIVATION", "SUCCESS", traceId, now);
     }
 
@@ -195,7 +222,12 @@ public class AuthService {
         Instant now = clock.instant();
         AccountRecord account = authRepository.lockByLoginId(loginId).orElse(null);
         try {
-            throttleService.assertAllowed(ThrottleOperation.PASSWORD_RESET, loginId, remoteAddress, now);
+            throttleService.assertAllowed(
+                    ThrottleOperation.PASSWORD_RESET,
+                    account == null ? null : account.id(),
+                    loginId,
+                    remoteAddress,
+                    now);
         } catch (AuthenticationThrottledException exception) {
             appendAudit(account, "AUTH_PASSWORD_RESET", "BLOCKED", traceId, now);
             throw exception;
@@ -211,32 +243,45 @@ public class AuthService {
                 && matchedCode != null;
 
         if (!usable) {
-            throttleService.recordFailure(ThrottleOperation.PASSWORD_RESET, loginId, remoteAddress, now);
+            throttleService.recordFailure(
+                    ThrottleOperation.PASSWORD_RESET,
+                    account == null ? null : account.id(),
+                    loginId,
+                    remoteAddress,
+                    now);
             appendAudit(account, "AUTH_PASSWORD_RESET", "FAILURE", traceId, now);
             throw new PasswordResetFailedException();
         }
 
         authRepository.markPasswordResetCodeUsed(matchedCode.id(), now);
         authRepository.revokeOtherPasswordResetCodes(account.id(), matchedCode.id(), now);
-        authRepository.resetPassword(account.id(), passwordEncoder.encode(newPassword), now);
+        authRepository.resetPassword(account.id(), encode(newPassword), now);
         authRepository.deleteSessions(account.loginId());
-        throttleService.clear(ThrottleOperation.PASSWORD_RESET, loginId, remoteAddress);
+        throttleService.clear(ThrottleOperation.PASSWORD_RESET, account.id(), loginId, remoteAddress);
         appendAudit(account, "AUTH_PASSWORD_RESET", "SUCCESS", traceId, now);
     }
 
     private Optional<StoredOneTimeCode> findMatchingCode(String rawCode, List<StoredOneTimeCode> codes) {
         if (codes.isEmpty()) {
-            passwordEncoder.matches(rawCode, dummyPasswordHash);
+            matches(rawCode, dummyPasswordHash);
             return Optional.empty();
         }
         StoredOneTimeCode code = codes.getFirst();
-        return passwordEncoder.matches(rawCode, code.codeHash())
+        return matches(rawCode, code.codeHash())
                 ? Optional.of(code)
                 : Optional.empty();
     }
 
+    private boolean matches(String rawValue, String encodedValue) {
+        return credentialVerificationLimiter.execute(() -> passwordEncoder.matches(rawValue, encodedValue));
+    }
+
+    private String encode(String rawValue) {
+        return credentialVerificationLimiter.execute(() -> passwordEncoder.encode(rawValue));
+    }
+
     private void appendAudit(AccountRecord account, String eventType, String outcome, String traceId, Instant now) {
-        auditLogRepository.append(
+        auditLogRepository.appendAuthentication(
                 account == null ? null : account.id(),
                 eventType,
                 account == null ? null : account.publicId(),

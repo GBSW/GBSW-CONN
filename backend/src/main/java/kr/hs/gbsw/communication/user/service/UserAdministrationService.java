@@ -63,6 +63,7 @@ public class UserAdministrationService {
             String reason,
             String traceId
     ) {
+        kr.hs.gbsw.communication.governance.service.GovernanceExecutionContext.requireActive();
         recentAuthenticationGuard.requireRecent(actor);
         Instant now = clock.instant();
         UUID userId = UUID.randomUUID();
@@ -87,6 +88,7 @@ public class UserAdministrationService {
 
     @Transactional
     public ProvisionedCode reissueActivationCode(AuthPrincipal actor, UUID publicId, String traceId) {
+        kr.hs.gbsw.communication.governance.service.GovernanceExecutionContext.requireActive();
         recentAuthenticationGuard.requireRecent(actor);
         Instant now = clock.instant();
         AccountRecord account = authRepository.lockByPublicId(publicId)
@@ -105,6 +107,7 @@ public class UserAdministrationService {
 
     @Transactional
     public ProvisionedCode issuePasswordResetCode(AuthPrincipal actor, UUID publicId, String traceId) {
+        kr.hs.gbsw.communication.governance.service.GovernanceExecutionContext.requireActive();
         recentAuthenticationGuard.requireRecent(actor);
         Instant now = clock.instant();
         AccountRecord account = authRepository.lockByPublicId(publicId)

@@ -16,10 +16,14 @@
 | 도메인 우선 백엔드 구조 | DONE | `backend/src/main/java/kr/hs/gbsw/communication` 기반; 도메인은 기능 구현 시 추가 |
 | Spring Boot, Next.js, MySQL 모노레포 | DONE | 루트 실행 환경과 각 애플리케이션 빌드 검증 |
 | TypeScript strict mode | DONE | `frontend/tsconfig.json`, typecheck 통과 |
-| Flyway 순차 마이그레이션 | DONE | 빈 MySQL 8.4.10에서 v1~v6 적용 통합 테스트 |
+| Flyway 순차 마이그레이션 | DONE | 현재 마이그레이션 전체를 빈 MySQL 8.4.10에 적용하는 통합 테스트 |
 | 공통 오류 응답과 traceId | DONE | 보호 경로 401과 안전한 traceId 자동 검증 |
 | 개발용 Swagger/OpenAPI | DONE | `/v3/api-docs`, `/swagger-ui.html` 기동 검증 |
 | OpenAPI 기반 프런트 타입 | DONE | 실제 OpenAPI에서 `api-schema.d.ts` 생성 및 컴파일 |
+| npm 공급망 고정 | IN PROGRESS | Node 24.18.0과 npm 11.6.2 고정, lockfile과 nanoid 3.3.16 override; audit 재확인 필요 |
+| Gradle 공급망 고정 | IN PROGRESS | 의존성 잠금과 Dependency-Check 구성; Gradle 9.4.0 공식 checksum과 verification metadata 필요 |
+| GitHub Action 불변 참조 | IN PROGRESS | 비-SHA 참조를 거부하는 정책 추가; 기존 Action의 검증된 SHA 교체 필요 |
+| 운영 컨테이너 산출물 | IN PROGRESS | 비루트 Dockerfile과 내부망 Compose 참조 구성; 실제 digest와 외부 운영 통제 필요 |
 | 실제 MySQL 통합 테스트 | DONE | Testcontainers 2.0.5 + MySQL 8.4.10 |
 | 저해상도 UX 흐름 사용자 검토 | DONE | 2026-08-02 정렬·동의 표시·담당자 비공개·자체 브랜딩 결정 반영 |
 | 접근성 및 E2E 테스트 | IN PROGRESS | 로그인·활성화 폼의 라벨·키보드·오류 알림 구현; 브라우저 E2E는 PLANNED |

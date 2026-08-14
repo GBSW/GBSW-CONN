@@ -1,0 +1,54 @@
+name: Security Policy
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+  schedule:
+    - cron: "23 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  immutable-action-references:
+    name: Immutable GitHub Action references
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download the exact repository revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir source
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${REPOSITORY}/tarball/${REVISION}" \
+            --output repository.tar.gz
+          tar -xzf repository.tar.gz --strip-components=1 -C source
+
+      - name: Reject mutable remote action references
+        run: |
+          set -euo pipefail
+          violations=0
+          while IFS= read -r file; do
+            while IFS= read -r spec; do
+              case "${spec}" in
+                ./*|docker://*) continue ;;
+              esac
+              ref="${spec##*@}"
+              if [[ ! "${ref}" =~ ^[0-9a-f]{40}$ ]]; then
+                printf 'Mutable action reference in %s: %s\n' "${file#source/}" "${spec}" >&2
+                violations=1
+              fi
+            done < <(sed -nE 's/^[[:space:]-]*uses:[[:space:]]*([^[:space:]#]+).*/\1/p' "${file}")
+          done < <(find source/.github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -print)
+          exit "${violations}"

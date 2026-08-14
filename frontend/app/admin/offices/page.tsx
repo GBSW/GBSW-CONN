@@ -15,7 +15,7 @@ export default function OfficeAdministrationPage() {
       <VStack className="page-frame motion-reveal" gap={6} paddingBlock={4}>
         <VStack gap={2} maxWidth="72ch">
           <Heading level={1} type="display-2">보직 관리</Heading>
-          <Text as="p" color="secondary">고정 심의자 세 보직의 임명, 종료, 이력을 계정 관리와 분리해 관리합니다.</Text>
+          <Text as="p" color="secondary">고정 심의자 보직 변경은 충돌 검증과 다른 관리자의 승인을 거쳐 실행됩니다.</Text>
         </VStack>
         <AdminConsole mode="offices" />
       </VStack>

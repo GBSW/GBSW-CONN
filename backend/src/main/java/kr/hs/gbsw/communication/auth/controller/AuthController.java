@@ -20,6 +20,7 @@ import kr.hs.gbsw.communication.auth.dto.response.CsrfTokenResponse;
 import kr.hs.gbsw.communication.auth.dto.response.CurrentUserResponse;
 import kr.hs.gbsw.communication.auth.service.AuthService;
 import kr.hs.gbsw.communication.common.security.TraceIdFilter;
+import kr.hs.gbsw.communication.common.security.ClientAddressResolver;
 import kr.hs.gbsw.communication.common.response.ErrorResponse;
 import kr.hs.gbsw.communication.common.config.ApplicationSecurityProperties;
 import org.slf4j.MDC;
@@ -51,6 +52,7 @@ public class AuthController {
     private final SecurityContextRepository securityContextRepository;
     private final CsrfTokenRepository csrfTokenRepository;
     private final ApplicationSecurityProperties properties;
+    private final ClientAddressResolver clientAddressResolver;
     private final SecurityContextHolderStrategy contextHolderStrategy =
             SecurityContextHolder.getContextHolderStrategy();
 
@@ -58,12 +60,14 @@ public class AuthController {
             AuthService authService,
             SecurityContextRepository securityContextRepository,
             CsrfTokenRepository csrfTokenRepository,
-            ApplicationSecurityProperties properties
+            ApplicationSecurityProperties properties,
+            ClientAddressResolver clientAddressResolver
     ) {
         this.authService = authService;
         this.securityContextRepository = securityContextRepository;
         this.csrfTokenRepository = csrfTokenRepository;
         this.properties = properties;
+        this.clientAddressResolver = clientAddressResolver;
     }
 
     @GetMapping("/csrf")
@@ -89,7 +93,7 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    @Operation(summary = "로그인", description = "계정/IP 영속 제한을 확인하고 새 MySQL 세션을 발급합니다.")
+    @Operation(summary = "로그인", description = "계정 영속 제한과 IP 메모리 제한을 확인하고 새 MySQL 세션을 발급합니다.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "로그인 성공과 새 서버 세션 발급"),
             @ApiResponse(responseCode = "400", description = "입력 검증 실패",
@@ -171,8 +175,7 @@ public class AuthController {
     }
 
     private String remoteAddress(HttpServletRequest request) {
-        String value = request.getRemoteAddr();
-        return value == null || value.isBlank() ? "unknown" : value;
+        return clientAddressResolver.resolve(request);
     }
 
     private String traceId() {

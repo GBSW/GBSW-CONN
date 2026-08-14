@@ -16,5 +16,13 @@ frontend/out/
 frontend/*.tsbuildinfo
 frontend/playwright-report/
 frontend/test-results/
+frontend/coverage/
+
+deploy/.env
+deploy/.env.*
+!deploy/production.env.example
+deploy/secrets/
+deploy/**/*.secret
+deploy/**/*.pem
 
 *.log

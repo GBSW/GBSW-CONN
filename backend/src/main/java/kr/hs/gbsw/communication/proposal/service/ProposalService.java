@@ -8,7 +8,6 @@ import kr.hs.gbsw.communication.audit.repository.AuditLogRepository;
 import kr.hs.gbsw.communication.auth.domain.AuthPrincipal;
 import kr.hs.gbsw.communication.proposal.config.ProposalProperties;
 import kr.hs.gbsw.communication.proposal.domain.AuthorVisibility;
-import kr.hs.gbsw.communication.proposal.domain.EncryptedProposalIdentity;
 import kr.hs.gbsw.communication.proposal.domain.LockedProposal;
 import kr.hs.gbsw.communication.proposal.domain.ProposalFeedScope;
 import kr.hs.gbsw.communication.proposal.domain.ProposalCommentRecord;
@@ -34,11 +33,12 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ProposalService {
 
-    private static final String INITIAL_STATUS_REASON = "제안 등록과 작성자 자동 동의";
+    private static final String INITIAL_STATUS_REASON = "제안 등록";
     private static final String FORMALIZATION_REASON = "유효 동의 임계값 도달";
 
     private final ProposalRepository repository;
-    private final ProposalIdentityCipher identityCipher;
+    private final ProposalIdentityVaultService identityVaultService;
+    private final ProposalOwnershipTagService ownershipTagService;
     private final ProposalProperties properties;
     private final ProposalWorkflowRepository workflowRepository;
     private final AuditLogRepository auditLogRepository;
@@ -46,14 +46,16 @@ public class ProposalService {
 
     public ProposalService(
             ProposalRepository repository,
-            ProposalIdentityCipher identityCipher,
+            ProposalIdentityVaultService identityVaultService,
+            ProposalOwnershipTagService ownershipTagService,
             ProposalProperties properties,
             ProposalWorkflowRepository workflowRepository,
             AuditLogRepository auditLogRepository,
             Clock clock
     ) {
         this.repository = repository;
-        this.identityCipher = identityCipher;
+        this.identityVaultService = identityVaultService;
+        this.ownershipTagService = ownershipTagService;
         this.properties = properties;
         this.workflowRepository = workflowRepository;
         this.auditLogRepository = auditLogRepository;
@@ -76,16 +78,14 @@ public class ProposalService {
         String normalizedTitle = title.strip();
         String normalizedContent = content.strip();
         String publicAuthorName = authorVisibility == AuthorVisibility.NAMED ? actor.displayName() : null;
-        EncryptedProposalIdentity identity = identityCipher.encrypt(publicId, actor.userId());
-
         repository.insertProposal(
                 proposalId, publicId, normalizedTitle, normalizedContent,
                 authorVisibility, publicAuthorName, now);
-        repository.insertIdentity(proposalId, identity, now);
-        repository.insertSupport(proposalId, actor.userId(), now);
+        identityVaultService.storeIdentity(proposalId, publicId, actor.userId(), now);
+        ownershipTagService.store(proposalId, publicId, actor.userId(), now);
         repository.insertStatusHistory(
                 proposalId, null, ProposalWorkflowStatus.GATHERING_SUPPORT,
-                null, 1, INITIAL_STATUS_REASON, now);
+                null, 0, INITIAL_STATUS_REASON, now);
         auditLogRepository.appendForTarget(
                 null, "PROPOSAL_CREATED", "PROPOSAL", publicId,
                 "SUCCESS", traceId, now);
@@ -94,9 +94,9 @@ public class ProposalService {
                 publicId, normalizedTitle, normalizedContent, authorVisibility, publicAuthorName,
                 ProposalWorkflowStatus.GATHERING_SUPPORT,
                 kr.hs.gbsw.communication.proposal.domain.ProposalVisibilityStatus.VISIBLE,
-                1, true, null, null, now);
+                0, false, null, null, now);
         ProposalStatusHistoryRecord initialHistory = new ProposalStatusHistoryRecord(
-                null, ProposalWorkflowStatus.GATHERING_SUPPORT, 1, INITIAL_STATUS_REASON, now);
+                null, ProposalWorkflowStatus.GATHERING_SUPPORT, 0, INITIAL_STATUS_REASON, now);
         return ProposalDetailResponse.from(created, List.of(initialHistory), properties.supportThreshold());
     }
 
@@ -134,7 +134,7 @@ public class ProposalService {
                 && workflowRepository.isCurrentAssignedTeacherByPublicId(publicId, viewer.userId(), now);
         boolean viewerCanEdit = proposal.workflowStatus() == ProposalWorkflowStatus.GATHERING_SUPPORT
                 && viewer.authorities().contains("ROLE_STUDENT")
-                && isAuthor(viewer, publicId);
+                && ownershipTagService.matches(publicId, viewer.userId());
         return ProposalDetailResponse.from(
                 proposal,
                 repository.findStatusHistory(publicId),
@@ -283,9 +283,7 @@ public class ProposalService {
     }
 
     private boolean isAuthor(AuthPrincipal actor, UUID publicId) {
-        EncryptedProposalIdentity identity = repository.findEncryptedIdentity(publicId)
-                .orElseThrow(ProposalNotFoundException::new);
-        return identityCipher.decrypt(publicId, identity).equals(actor.userId());
+        return ownershipTagService.matches(publicId, actor.userId());
     }
 
     private void requireAuthor(AuthPrincipal actor, UUID publicId) {

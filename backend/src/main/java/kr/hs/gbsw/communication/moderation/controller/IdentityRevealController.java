@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.util.UUID;
 import kr.hs.gbsw.communication.auth.domain.AuthPrincipal;
 import kr.hs.gbsw.communication.common.security.TraceIdFilter;
+import kr.hs.gbsw.communication.common.security.ClientAddressResolver;
 import kr.hs.gbsw.communication.moderation.dto.request.IdentityRevealRequest;
 import kr.hs.gbsw.communication.moderation.dto.response.IdentityRevealResponse;
 import kr.hs.gbsw.communication.moderation.service.IdentityRevealService;
@@ -27,9 +28,14 @@ import org.springframework.web.bind.annotation.RestController;
 public class IdentityRevealController {
 
     private final IdentityRevealService service;
+    private final ClientAddressResolver clientAddressResolver;
 
-    public IdentityRevealController(IdentityRevealService service) {
+    public IdentityRevealController(
+            IdentityRevealService service,
+            ClientAddressResolver clientAddressResolver
+    ) {
         this.service = service;
+        this.clientAddressResolver = clientAddressResolver;
     }
 
     @PostMapping("/{publicId}/reveal")
@@ -55,6 +61,6 @@ public class IdentityRevealController {
     }
 
     private String remoteAddress(HttpServletRequest request) {
-        return request.getRemoteAddr() == null ? "unknown" : request.getRemoteAddr();
+        return clientAddressResolver.resolve(request);
     }
 }

@@ -62,11 +62,12 @@ public class IdentityRevealService {
             String remoteAddress,
             String traceId
     ) {
-        if (!actor.authorities().contains("ROLE_TEACHER")) {
-            throw new AccessDeniedException("Identity reveal requires a teacher role");
-        }
+        IdentityRevealAuthorizationPolicy.requireAllowed(actor);
         recentAuthenticationGuard.requireRecent(actor);
         Instant now = clock.instant();
+        if (!repository.isEligibleIdentityRevealActor(actor.userId(), now)) {
+            throw new AccessDeniedException("Identity reveal actor is no longer eligible");
+        }
         try {
             throttleService.assertAllowed(
                     ThrottleOperation.IDENTITY_REVEAL, actor.loginId(), remoteAddress, now);

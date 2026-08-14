@@ -1,7 +1,7 @@
 "use client";
 
 import type { components } from "@/lib/api-schema";
-import { apiPost, errorMessage } from "@/lib/api-client";
+import { ApiRequestError, apiPost, errorMessage } from "@/lib/api-client";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
@@ -13,7 +13,15 @@ import { FormEvent, useState } from "react";
 
 type ContentReportResponse = components["schemas"]["ContentReportResponse"];
 
-export function ProposalReportForm({ publicId }: { publicId: string }) {
+export function ProposalReportForm({
+  publicId,
+  onUnavailable,
+  onSignedOut,
+}: {
+  publicId: string;
+  onUnavailable: () => void;
+  onSignedOut: () => void;
+}) {
   const [reason, setReason] = useState("");
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
@@ -30,6 +38,14 @@ export function ProposalReportForm({ publicId }: { publicId: string }) {
       setReported(true);
       setOpen(false);
     } catch (caught) {
+      if (caught instanceof ApiRequestError && caught.code === "PROPOSAL_NOT_FOUND") {
+        onUnavailable();
+        return;
+      }
+      if (caught instanceof ApiRequestError && ["AUTHENTICATION_REQUIRED", "SESSION_INVALIDATED"].includes(caught.code)) {
+        onSignedOut();
+        return;
+      }
       setError(errorMessage(caught));
     } finally {
       setPending(false);

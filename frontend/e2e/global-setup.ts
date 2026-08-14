@@ -9,6 +9,7 @@ export default async function globalSetup(config: FullConfig) {
   const bootstrapFile = required("E2E_BOOTSTRAP_FILE");
   const dataFile = required("E2E_DATA_FILE");
   const stateDir = required("E2E_STATE_DIR");
+  const deliveryDir = required("E2E_DELIVERY_DIR");
   await mkdir(stateDir, { recursive: true, mode: 0o700 });
 
   const bootstrap = Object.fromEntries((await readFile(bootstrapFile, "utf8")).trim().split("\n").map((line) => line.split("=", 2)));
@@ -16,18 +17,19 @@ export default async function globalSetup(config: FullConfig) {
   await write(admin, "POST", "/api/v1/auth/activate", { loginId: bootstrap.loginId, activationCode: bootstrap.activationCode, password });
   await write(admin, "POST", "/api/v1/auth/login", { loginId: bootstrap.loginId, password });
   await admin.storageState({ path: join(stateDir, "admin.json") });
+  const approver = await createBootstrapApprover(admin, baseURL, deliveryDir);
 
   const actors: Array<{ context: APIRequestContext; loginId: string; publicId: string }> = [];
   for (let index = 0; index < 50; index += 1) {
     const loginId = `e2e.student.${String(index).padStart(2, "0")}`;
-    actors.push(await createActor(admin, baseURL, { loginId, displayName: `E2E 학생 ${index + 1}`, role: "STUDENT" }));
+    actors.push(await createActor(admin, approver.context, baseURL, deliveryDir, { loginId, displayName: `E2E 학생 ${index + 1}`, role: "STUDENT" }));
   }
-  const affairs = await createActor(admin, baseURL, { loginId: "e2e.teacher.affairs", displayName: "E2E 학생부장", role: "TEACHER" });
-  const teacher = await createActor(admin, baseURL, { loginId: "e2e.teacher.assignee", displayName: "E2E 담당 교사", role: "TEACHER" });
+  const affairs = await createActor(admin, approver.context, baseURL, deliveryDir, { loginId: "e2e.teacher.affairs", displayName: "E2E 학생부장", role: "TEACHER" });
+  const teacher = await createActor(admin, approver.context, baseURL, deliveryDir, { loginId: "e2e.teacher.assignee", displayName: "E2E 담당 교사", role: "TEACHER" });
 
-  await write(admin, "POST", "/api/v1/admin/offices/STUDENT_AFFAIRS_TEACHER/appointments", appointment(affairs.publicId, "E2E 학생부장 임명"));
-  await write(admin, "POST", "/api/v1/admin/offices/STUDENT_COUNCIL_PRESIDENT/appointments", appointment(actors[1]!.publicId, "E2E 학생회장 임명"));
-  await write(admin, "POST", "/api/v1/admin/offices/STUDENT_COUNCIL_VICE_PRESIDENT/appointments", appointment(actors[2]!.publicId, "E2E 학생부회장 임명"));
+  await executeGovernedChange(admin, approver.context, appointment("STUDENT_AFFAIRS_TEACHER", affairs.publicId, "E2E 학생부장 임명"));
+  await executeGovernedChange(admin, approver.context, appointment("STUDENT_COUNCIL_PRESIDENT", actors[1]!.publicId, "E2E 학생회장 임명"));
+  await executeGovernedChange(admin, approver.context, appointment("STUDENT_COUNCIL_VICE_PRESIDENT", actors[2]!.publicId, "E2E 학생부회장 임명"));
   for (const actor of [affairs, actors[1]!, actors[2]!]) {
     await write(actor.context, "POST", "/api/v1/auth/login", { loginId: actor.loginId, password });
   }
@@ -38,6 +40,7 @@ export default async function globalSetup(config: FullConfig) {
     content: "공용 공간을 공정하게 이용할 수 있도록 예약 현황과 이용 원칙을 학생들이 확인할 수 있게 해 주세요.",
     authorVisibility: "ANONYMOUS",
   });
+  await write(actors[0]!.context, "PUT", `/api/v1/proposals/${proposal.publicId}/support`);
   for (let start = 1; start < actors.length; start += 8) {
     await Promise.all(actors.slice(start, start + 8).map((actor) => write(actor.context, "PUT", `/api/v1/proposals/${proposal.publicId}/support`)));
   }
@@ -82,19 +85,56 @@ export default async function globalSetup(config: FullConfig) {
     identityCaseId: identityCase.publicId,
     password,
   }, null, 2), { mode: 0o600 });
-  await Promise.all([...actors.map((actor) => actor.context.dispose()), affairs.context.dispose(), teacher.context.dispose(), admin.dispose()]);
+  await Promise.all([...actors.map((actor) => actor.context.dispose()), affairs.context.dispose(), teacher.context.dispose(), approver.context.dispose(), admin.dispose()]);
 }
 
-async function createActor(admin: APIRequestContext, baseURL: string, actor: { loginId: string; displayName: string; role: "STUDENT" | "TEACHER" }) {
-  const code = await write<{ userPublicId: string; code: string }>(admin, "POST", "/api/v1/admin/users", { ...actor, reason: "Playwright E2E 격리 데이터" });
+async function createBootstrapApprover(admin: APIRequestContext, baseURL: string, deliveryDir: string) {
+  const actor = { loginId: "e2e.admin.approver", displayName: "E2E 승인 관리자", role: "SUPER_ADMIN" as const };
+  const change = await requestGovernedChange(admin, { changeType: "CREATE_ACCOUNT", ...actor, reason: "초기 2인 승인 정족수 구성" });
+  await approveGovernedChange(admin, change.publicId);
+  const delivery = await deliveredCredential(deliveryDir, actor.loginId);
   const context = await request.newContext({ baseURL });
-  await write(context, "POST", "/api/v1/auth/activate", { loginId: actor.loginId, activationCode: code.code, password });
+  await write(context, "POST", "/api/v1/auth/activate", { loginId: actor.loginId, activationCode: delivery.oneTimeCode, password });
   await write(context, "POST", "/api/v1/auth/login", { loginId: actor.loginId, password });
-  return { context, loginId: actor.loginId, publicId: code.userPublicId };
+  return { context, loginId: actor.loginId, publicId: delivery.userPublicId };
 }
 
-function appointment(userPublicId: string, reason: string) {
-  return { userPublicId, replaceExistingAtStart: false, reason };
+async function createActor(
+  requester: APIRequestContext,
+  approver: APIRequestContext,
+  baseURL: string,
+  deliveryDir: string,
+  actor: { loginId: string; displayName: string; role: "STUDENT" | "TEACHER" },
+) {
+  const change = await requestGovernedChange(requester, { changeType: "CREATE_ACCOUNT", ...actor, reason: "Playwright E2E 격리 데이터" });
+  await approveGovernedChange(approver, change.publicId);
+  const delivery = await deliveredCredential(deliveryDir, actor.loginId);
+  const context = await request.newContext({ baseURL });
+  await write(context, "POST", "/api/v1/auth/activate", { loginId: actor.loginId, activationCode: delivery.oneTimeCode, password });
+  await write(context, "POST", "/api/v1/auth/login", { loginId: actor.loginId, password });
+  return { context, loginId: actor.loginId, publicId: delivery.userPublicId };
+}
+
+function appointment(office: string, targetUserPublicId: string, reason: string) {
+  return { changeType: "APPOINT_OFFICE", office, targetUserPublicId, replaceExistingAtStart: false, reason };
+}
+
+async function executeGovernedChange(requester: APIRequestContext, approver: APIRequestContext, change: unknown) {
+  const requested = await requestGovernedChange(requester, change);
+  return await approveGovernedChange(approver, requested.publicId);
+}
+
+async function requestGovernedChange(context: APIRequestContext, change: unknown) {
+  return await write<{ publicId: string }>(context, "POST", "/api/v1/admin/governance/requests", change);
+}
+
+async function approveGovernedChange(context: APIRequestContext, publicId: string) {
+  return await write(context, "POST", `/api/v1/admin/governance/requests/${publicId}/approve`, { reason: "E2E 독립 승인" });
+}
+
+async function deliveredCredential(deliveryDir: string, loginId: string) {
+  const value = await readFile(join(deliveryDir, `${encodeURIComponent(loginId)}.json`), "utf8");
+  return JSON.parse(value) as { userPublicId: string; oneTimeCode: string };
 }
 
 function response(content: string, decisionReason: string) {

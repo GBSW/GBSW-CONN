@@ -7,7 +7,6 @@ import kr.hs.gbsw.communication.audit.repository.AuditLogRepository;
 import kr.hs.gbsw.communication.auth.domain.AuthPrincipal;
 import kr.hs.gbsw.communication.proposal.domain.LockedProposal;
 import kr.hs.gbsw.communication.proposal.domain.ProposalWorkflowStatus;
-import kr.hs.gbsw.communication.proposal.exception.ProposalAssignmentRequiredException;
 import kr.hs.gbsw.communication.proposal.exception.ProposalNotFoundException;
 import kr.hs.gbsw.communication.proposal.exception.ProposalStateConflictException;
 import kr.hs.gbsw.communication.proposal.repository.ProposalRepository;
@@ -176,11 +175,9 @@ public class ProposalWorkflowService {
         if (!actor.authorities().contains("ROLE_TEACHER")) {
             throw new AccessDeniedException("Teacher role is required");
         }
-        LockedProposal proposal = workflowRepository.lockByPublicId(publicId)
+        LockedProposal proposal = workflowRepository.lockByPublicIdForAssignedTeacher(
+                        publicId, actor.userId(), now)
                 .orElseThrow(ProposalNotFoundException::new);
-        if (!workflowRepository.isCurrentAssignedTeacher(proposal.id(), actor.userId(), now)) {
-            throw new ProposalAssignmentRequiredException();
-        }
         return proposal;
     }
 

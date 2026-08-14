@@ -41,6 +41,64 @@ public class ProposalWorkflowRepository {
                 publicId.toString()).stream().findFirst();
     }
 
+    public Optional<LockedProposal> lockByPublicIdForAssignedTeacher(
+            UUID publicId,
+            UUID teacherUserId,
+            Instant now
+    ) {
+        return jdbcTemplate.query("""
+                        SELECT BIN_TO_UUID(proposal.id) AS id,
+                               BIN_TO_UUID(proposal.public_id) AS public_id,
+                               proposal.workflow_status,
+                               proposal.visibility_status
+                        FROM proposals proposal
+                        JOIN proposal_teacher_assignments assignment
+                          ON assignment.proposal_id = proposal.id
+                         AND assignment.unassigned_at IS NULL
+                         AND assignment.teacher_user_id = UUID_TO_BIN(?)
+                        JOIN users teacher ON teacher.id = assignment.teacher_user_id
+                        WHERE proposal.public_id = UUID_TO_BIN(?)
+                          AND proposal.withdrawn_at IS NULL
+                          AND teacher.account_status = 'ACTIVE'
+                          AND EXISTS (
+                              SELECT 1
+                              FROM role_assignments teacher_role
+                              WHERE teacher_role.user_id = teacher.id
+                                AND teacher_role.role_type = 'TEACHER'
+                                AND teacher_role.starts_at <= ?
+                                AND (teacher_role.ends_at IS NULL OR teacher_role.ends_at > ?)
+                          )
+                        FOR UPDATE
+                        """,
+                (resultSet, rowNumber) -> new LockedProposal(
+                        UUID.fromString(resultSet.getString("id")),
+                        UUID.fromString(resultSet.getString("public_id")),
+                        ProposalWorkflowStatus.valueOf(resultSet.getString("workflow_status")),
+                        ProposalVisibilityStatus.valueOf(resultSet.getString("visibility_status"))),
+                teacherUserId.toString(), publicId.toString(), Timestamp.from(now), Timestamp.from(now))
+                .stream().findFirst();
+    }
+
+    public Optional<LockedProposal> lockReportableByPublicId(UUID publicId) {
+        return jdbcTemplate.query("""
+                        SELECT BIN_TO_UUID(id) AS id,
+                               BIN_TO_UUID(public_id) AS public_id,
+                               workflow_status,
+                               visibility_status
+                        FROM proposals
+                        WHERE public_id = UUID_TO_BIN(?)
+                          AND visibility_status = 'VISIBLE'
+                          AND withdrawn_at IS NULL
+                        FOR UPDATE
+                        """,
+                (resultSet, rowNumber) -> new LockedProposal(
+                        UUID.fromString(resultSet.getString("id")),
+                        UUID.fromString(resultSet.getString("public_id")),
+                        ProposalWorkflowStatus.valueOf(resultSet.getString("workflow_status")),
+                        ProposalVisibilityStatus.valueOf(resultSet.getString("visibility_status"))),
+                publicId.toString()).stream().findFirst();
+    }
+
     public boolean isActiveRole(UUID userId, String role, Instant now) {
         Integer active = jdbcTemplate.queryForObject("""
                         SELECT EXISTS (
