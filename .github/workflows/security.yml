@@ -52,3 +52,28 @@ jobs:
             done < <(sed -nE 's/^[[:space:]-]*uses:[[:space:]]*([^[:space:]#]+).*/\1/p' "${file}")
           done < <(find source/.github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -print)
           exit "${violations}"
+
+  backend-dependency-scan:
+    name: Backend dependency vulnerability scan
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Require the NVD API key
+        run: |
+          if [[ -z "${NVD_API_KEY}" ]]; then
+            echo "::error::Repository secret NVD_API_KEY is required for the scheduled dependency scan."
+            exit 1
+          fi
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: gradle
+      - uses: gradle/actions/setup-gradle@4c125117fe7c5aed11272ec4213f602f012f89f2 # v5
+      - name: Scan backend dependencies
+        working-directory: backend
+        run: ./gradlew dependencyCheckAnalyze --no-daemon
