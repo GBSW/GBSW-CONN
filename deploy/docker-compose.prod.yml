@@ -1,0 +1,127 @@
+name: gbsw-communication-production
+
+services:
+  db:
+    image: ${MYSQL_IMAGE:?set MYSQL_IMAGE to an approved immutable digest}
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:?set DB_NAME}
+      MYSQL_USER: ${DB_USERNAME:?set DB_USERNAME}
+      MYSQL_PASSWORD_FILE: /run/secrets/db_password
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/db_root_password
+    secrets:
+      - db_password
+      - db_root_password
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping --host=127.0.0.1 --user=root --password=$$(cat /run/secrets/db_root_password) --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+
+  backend:
+    image: ${BACKEND_IMAGE:?set BACKEND_IMAGE to an approved immutable digest}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_URL: ${DB_URL:?set the internal production JDBC URL}
+      DB_USERNAME: ${DB_USERNAME:?set DB_USERNAME}
+      PROPOSAL_IDENTITY_KEY_VERSION: ${PROPOSAL_IDENTITY_KEY_VERSION:?set the active key version}
+      PROPOSAL_OWNERSHIP_KEY_VERSION: ${PROPOSAL_OWNERSHIP_KEY_VERSION:?set the ownership key version}
+      CREDENTIAL_DELIVERY_ENDPOINT: ${CREDENTIAL_DELIVERY_ENDPOINT:?set the HTTPS credential delivery endpoint}
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:?set the trusted TLS proxy CIDRs}
+    secrets:
+      - db_password
+      - throttle_fingerprint_secret
+      - proposal_identity_key_base64
+      - proposal_ownership_key_base64
+      - credential_delivery_bearer_token
+    expose:
+      - "8080"
+    networks:
+      - app
+      - data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  frontend:
+    image: ${FRONTEND_IMAGE:?set FRONTEND_IMAGE to an approved immutable digest}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:8080
+    expose:
+      - "3000"
+    networks:
+      - app
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  gateway:
+    image: ${NGINX_IMAGE:?set NGINX_IMAGE to an approved immutable digest}
+    restart: unless-stopped
+    depends_on:
+      frontend:
+        condition: service_healthy
+    ports:
+      - "${PUBLIC_BIND_ADDRESS:-127.0.0.1}:${PUBLIC_HTTP_PORT:-8080}:8080"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - app
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  app:
+    internal: true
+  data:
+    internal: true
+
+volumes:
+  mysql-data:
+
+secrets:
+  db_password:
+    file: ${DB_PASSWORD_FILE:?set DB_PASSWORD_FILE}
+  db_root_password:
+    file: ${DB_ROOT_PASSWORD_FILE:?set DB_ROOT_PASSWORD_FILE}
+  throttle_fingerprint_secret:
+    file: ${THROTTLE_FINGERPRINT_SECRET_FILE:?set THROTTLE_FINGERPRINT_SECRET_FILE}
+  proposal_identity_key_base64:
+    file: ${PROPOSAL_IDENTITY_KEY_BASE64_FILE:?set PROPOSAL_IDENTITY_KEY_BASE64_FILE}
+  proposal_ownership_key_base64:
+    file: ${PROPOSAL_OWNERSHIP_KEY_BASE64_FILE:?set PROPOSAL_OWNERSHIP_KEY_BASE64_FILE}
+  credential_delivery_bearer_token:
+    file: ${CREDENTIAL_DELIVERY_BEARER_TOKEN_FILE:?set CREDENTIAL_DELIVERY_BEARER_TOKEN_FILE}

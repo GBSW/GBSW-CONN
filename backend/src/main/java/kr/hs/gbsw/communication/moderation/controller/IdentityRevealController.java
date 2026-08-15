@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.util.UUID;
 import kr.hs.gbsw.communication.auth.domain.AuthPrincipal;
 import kr.hs.gbsw.communication.common.security.TraceIdFilter;
+import kr.hs.gbsw.communication.common.security.ClientAddressResolver;
 import kr.hs.gbsw.communication.moderation.dto.request.IdentityRevealRequest;
 import kr.hs.gbsw.communication.moderation.dto.response.IdentityRevealResponse;
 import kr.hs.gbsw.communication.moderation.service.IdentityRevealService;
@@ -23,13 +24,18 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/v1/identity-reveal-cases")
-@Tag(name = "Identity reveal", description = "승인된 사건의 일회성 작성자 신원 확인")
+@Tag(name = "Identity reveal", description = "승인된 사건의 기간 제한 작성자 신원 확인")
 public class IdentityRevealController {
 
     private final IdentityRevealService service;
+    private final ClientAddressResolver clientAddressResolver;
 
-    public IdentityRevealController(IdentityRevealService service) {
+    public IdentityRevealController(
+            IdentityRevealService service,
+            ClientAddressResolver clientAddressResolver
+    ) {
         this.service = service;
+        this.clientAddressResolver = clientAddressResolver;
     }
 
     // 열람 자격은 역할이 아니라 사건에 고정된 심의자인지로 정해진다. 학생회장과
@@ -59,6 +65,6 @@ public class IdentityRevealController {
     }
 
     private String remoteAddress(HttpServletRequest request) {
-        return request.getRemoteAddr() == null ? "unknown" : request.getRemoteAddr();
+        return clientAddressResolver.resolve(request);
     }
 }

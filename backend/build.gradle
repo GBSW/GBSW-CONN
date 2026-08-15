@@ -2,6 +2,7 @@ plugins {
     id 'java'
     id 'org.springframework.boot' version '4.1.0'
     id 'io.spring.dependency-management' version '1.1.7'
+    id 'org.owasp.dependencycheck' version '12.1.8'
 }
 
 group = 'kr.hs.gbsw'
@@ -19,6 +20,16 @@ repositories {
 
 dependencyLocking {
     lockAllConfigurations()
+}
+
+dependencyCheck {
+    failBuildOnCVSS = 7.0
+    formats = ['HTML', 'JSON']
+    suppressionFile = file('config/dependency-check-suppressions.xml').absolutePath
+
+    nvd {
+        apiKey = System.getenv('NVD_API_KEY')
+    }
 }
 
 dependencies {

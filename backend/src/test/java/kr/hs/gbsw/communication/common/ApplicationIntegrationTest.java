@@ -2,6 +2,8 @@ package kr.hs.gbsw.communication.common;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -29,7 +31,11 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.StreamSupport;
+import kr.hs.gbsw.communication.auth.delivery.CredentialDeliveryCommand;
+import kr.hs.gbsw.communication.auth.delivery.CredentialDeliveryPort;
+import kr.hs.gbsw.communication.auth.delivery.CredentialDeliveryReceipt;
 import kr.hs.gbsw.communication.auth.domain.AuthPrincipal;
 import kr.hs.gbsw.communication.moderation.domain.ModerationCaseStatus;
 import kr.hs.gbsw.communication.moderation.domain.ModerationCaseType;
@@ -55,6 +61,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.junit.jupiter.Container;
@@ -84,7 +91,13 @@ class ApplicationIntegrationTest {
         registry.add("app.identity-vault.key-base64",
                 () -> "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=");
         registry.add("app.identity-vault.key-version", () -> "1");
+        registry.add("app.proposal-ownership.key-base64",
+                () -> "YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODk=");
+        registry.add("app.proposal-ownership.key-version", () -> "1");
         registry.add("app.security.rate-limit.login-failures-before-delay", () -> "3");
+        registry.add("app.security.rate-limit.general-requests-per-minute", () -> "1000");
+        registry.add("app.deployment.authentication-requests-per-minute", () -> "1000");
+        registry.add("springdoc.api-docs.enabled", () -> "true");
     }
 
     @LocalServerPort
@@ -104,6 +117,11 @@ class ApplicationIntegrationTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @MockitoBean
+    private CredentialDeliveryPort credentialDeliveryPort;
+
+    private final AtomicReference<CredentialDeliveryCommand> deliveredCredential = new AtomicReference<>();
 
     @Autowired
     private SuperAdminBootstrapService superAdminBootstrapService;
@@ -127,6 +145,12 @@ class ApplicationIntegrationTest {
 
     @BeforeEach
     void cleanApplicationData() {
+        deliveredCredential.set(null);
+        doAnswer(invocation -> {
+            CredentialDeliveryCommand command = invocation.getArgument(0);
+            deliveredCredential.set(command);
+            return new CredentialDeliveryReceipt("integration-test-delivery");
+        }).when(credentialDeliveryPort).deliver(any());
         jdbcTemplate.update("DELETE FROM audit_logs");
         jdbcTemplate.update("DELETE FROM identity_reveal_records");
         jdbcTemplate.update("DELETE FROM proposal_visibility_history");
@@ -140,11 +164,14 @@ class ApplicationIntegrationTest {
         jdbcTemplate.update("DELETE FROM proposal_teacher_assignments");
         jdbcTemplate.update("DELETE FROM proposal_status_history");
         jdbcTemplate.update("DELETE FROM proposal_supports");
+        jdbcTemplate.update("DELETE FROM proposal_author_ownership_tags");
         jdbcTemplate.update("DELETE FROM proposal_identities");
         jdbcTemplate.update("DELETE FROM proposals");
         jdbcTemplate.update("DELETE FROM bootstrap_markers");
         jdbcTemplate.update("DELETE FROM password_reset_tokens");
         jdbcTemplate.update("DELETE FROM activation_codes");
+        jdbcTemplate.update("DELETE FROM credential_delivery_records");
+        jdbcTemplate.update("DELETE FROM privileged_change_requests");
         jdbcTemplate.update("DELETE FROM office_assignments");
         jdbcTemplate.update("DELETE FROM role_assignments");
         jdbcTemplate.update("DELETE FROM credentials");
@@ -155,7 +182,7 @@ class ApplicationIntegrationTest {
 
     @Test
     void appliesFlywayAndCreatesJdbcSessionTablesOnEmptyMySql() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("8");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("15");
 
         Integer sessionTableCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'SPRING_SESSION'",
@@ -321,6 +348,10 @@ class ApplicationIntegrationTest {
 
         for (int attempt = 0; attempt < 3; attempt++) {
             mockMvc.perform(post("/api/v1/auth/login")
+                            .with(request -> {
+                                request.setRemoteAddr("203.0.113.10");
+                                return request;
+                            })
                             .with(csrf())
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"loginId\":\"known.student\",\"password\":\"wrong password value\"}"))
@@ -344,7 +375,7 @@ class ApplicationIntegrationTest {
                         SELECT COUNT(*) FROM security_throttle_states
                         WHERE failure_count = 3 AND blocked_until IS NOT NULL
                         """, Integer.class))
-                .isEqualTo(2);
+                .isEqualTo(1);
 
         mockMvc.perform(post("/api/v1/auth/login")
                         .with(request -> {
@@ -408,22 +439,62 @@ class ApplicationIntegrationTest {
                                 """))
                 .andExpect(status().isForbidden());
 
-        createActiveAccount("system.admin", "시스템 관리자", "SUPER_ADMIN", "admin secure passphrase");
-        Cookie adminSession = requireSessionCookie(login("system.admin", "admin secure passphrase"));
-        MvcResult created = mockMvc.perform(post("/api/v1/admin/users")
-                        .cookie(adminSession)
+        createActiveAccount("system.requester", "요청 관리자", "SUPER_ADMIN", "requester secure passphrase");
+        Cookie requesterSession = requireSessionCookie(login("system.requester", "requester secure passphrase"));
+
+        UUID quorumRequestId = requestGovernedChange(requesterSession, Map.of(
+                "changeType", "CREATE_ACCOUNT",
+                "loginId", "system.approver",
+                "displayName", "승인 관리자",
+                "role", "SUPER_ADMIN",
+                "reason", "초기 2인 승인 정족수 구성"));
+        approveGovernedChange(requesterSession, quorumRequestId);
+        CredentialDeliveryCommand quorumDelivery = deliveredCredential.get();
+        assertThat(quorumDelivery).isNotNull();
+        UUID reissueRequestId = requestGovernedChange(requesterSession, Map.of(
+                "changeType", "REISSUE_ACTIVATION_CODE",
+                "targetUserPublicId", quorumDelivery.targetUserPublicId(),
+                "reason", "초기 정족수 활성화 코드 복구"));
+        approveGovernedChange(requesterSession, reissueRequestId);
+        CredentialDeliveryCommand reissuedQuorumDelivery = deliveredCredential.get();
+        assertThat(reissuedQuorumDelivery.oneTimeCode()).isNotEqualTo(quorumDelivery.oneTimeCode());
+        mockMvc.perform(post("/api/v1/auth/activate")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "loginId", "system.approver",
+                                "activationCode", reissuedQuorumDelivery.oneTimeCode(),
+                                "password", "approver secure passphrase"))))
+                .andExpect(status().isNoContent());
+        Cookie approverSession = requireSessionCookie(login("system.approver", "approver secure passphrase"));
+        deliveredCredential.set(null);
+
+        mockMvc.perform(post("/api/v1/admin/users")
+                        .cookie(requesterSession)
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"loginId":"new.student","displayName":"새 학생","role":"STUDENT","reason":"2026학년도 등록"}
                                 """))
-                .andExpect(status().isCreated())
-                .andExpect(header().string("Cache-Control", "no-store"))
-                .andExpect(jsonPath("$.code").isString())
-                .andReturn();
+                .andExpect(status().isForbidden());
 
-        JsonNode body = objectMapper.readTree(created.getResponse().getContentAsString());
-        String rawCode = body.get("code").asText();
+        UUID governanceRequestId = requestGovernedChange(requesterSession, Map.of(
+                "changeType", "CREATE_ACCOUNT",
+                "loginId", "new.student",
+                "displayName", "새 학생",
+                "role", "STUDENT",
+                "reason", "2026학년도 등록"));
+        mockMvc.perform(post("/api/v1/admin/governance/requests/{publicId}/approve", governanceRequestId)
+                        .cookie(requesterSession)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"자기 승인 시도\"}"))
+                .andExpect(status().isForbidden());
+        MvcResult approved = approveGovernedChange(approverSession, governanceRequestId);
+
+        CredentialDeliveryCommand delivery = deliveredCredential.get();
+        assertThat(delivery).isNotNull();
+        String rawCode = delivery.oneTimeCode();
         String storedCode = jdbcTemplate.queryForObject("""
                         SELECT ac.code_hash
                         FROM activation_codes ac
@@ -431,12 +502,20 @@ class ApplicationIntegrationTest {
                         WHERE u.login_id = 'new.student'
                         """, String.class);
         assertThat(rawCode).hasSize(16);
+        assertThat(delivery.recipientReference()).isEqualTo("new.student");
+        assertThat(approved.getResponse().getContentAsString()).doesNotContain(rawCode, "\"code\"");
         assertThat(storedCode).startsWith("$argon2id$").doesNotContain(rawCode);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM credential_delivery_records WHERE delivery_status = 'DELIVERED'",
+                Integer.class)).isEqualTo(3);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM privileged_change_requests WHERE bootstrap_quorum_exception = TRUE",
+                Integer.class)).isEqualTo(2);
         assertThat(jdbcTemplate.queryForObject("""
                         SELECT COUNT(*) FROM audit_logs
                         WHERE event_type = 'ADMIN_ACCOUNT_CREATED' AND outcome = 'SUCCESS'
                         """, Integer.class))
-                .isEqualTo(1);
+                .isEqualTo(2);
     }
 
     @Test
@@ -520,8 +599,8 @@ class ApplicationIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.authorVisibility").value("ANONYMOUS"))
                 .andExpect(jsonPath("$.authorDisplayName").doesNotExist())
-                .andExpect(jsonPath("$.supportCount").value(1))
-                .andExpect(jsonPath("$.viewerSupported").value(true))
+                .andExpect(jsonPath("$.supportCount").value(0))
+                .andExpect(jsonPath("$.viewerSupported").value(false))
                 .andExpect(jsonPath("$.workflowStatus").value("GATHERING_SUPPORT"))
                 .andReturn();
         JsonNode anonymousBody = objectMapper.readTree(anonymousCreated.getResponse().getContentAsString());
@@ -705,10 +784,10 @@ class ApplicationIntegrationTest {
                             .cookie(supporterSession).with(csrf()))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.supported").value(true))
-                    .andExpect(jsonPath("$.supportCount").value(2));
+                    .andExpect(jsonPath("$.supportCount").value(1));
         }
         assertThat(jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM proposal_supports", Integer.class)).isEqualTo(2);
+                "SELECT COUNT(*) FROM proposal_supports", Integer.class)).isEqualTo(1);
 
         SeedAccount concurrentStudent = insertUser(
                 "support.concurrent", "동시 동의 학생", "ACTIVE", "STUDENT");
@@ -727,19 +806,19 @@ class ApplicationIntegrationTest {
             duplicateReady.await();
             duplicateStart.countDown();
             assertThat(List.of(first.get(), second.get()))
-                    .allSatisfy(result -> assertThat(result.supportCount()).isEqualTo(3));
+                    .allSatisfy(result -> assertThat(result.supportCount()).isEqualTo(2));
         } finally {
             duplicateExecutor.shutdownNow();
         }
         assertThat(jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM proposal_supports", Integer.class)).isEqualTo(3);
+                "SELECT COUNT(*) FROM proposal_supports", Integer.class)).isEqualTo(2);
 
         for (int request = 0; request < 2; request++) {
             mockMvc.perform(delete("/api/v1/proposals/{publicId}/support", publicId)
                             .cookie(supporterSession).with(csrf()))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.supported").value(false))
-                    .andExpect(jsonPath("$.supportCount").value(2));
+                    .andExpect(jsonPath("$.supportCount").value(1));
         }
         mockMvc.perform(put("/api/v1/proposals/{publicId}/support", publicId)
                         .cookie(teacherSession).with(csrf()))
@@ -973,7 +1052,7 @@ class ApplicationIntegrationTest {
                 AuthorVisibility.ANONYMOUS,
                 "threshold-create-trace").publicId();
 
-        for (int index = 0; index < 47; index++) {
+        for (int index = 0; index < 48; index++) {
             SeedAccount supporter = insertUser(
                     "threshold.student." + index, "임계값 학생 " + index, "ACTIVE", "STUDENT");
             proposalService.support(studentPrincipal(supporter), publicId, "threshold-sequential-trace");
@@ -1145,8 +1224,8 @@ class ApplicationIntegrationTest {
                         .cookie(otherTeacherSession).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"reason\":\"담당자가 아닌 교사의 시도\"}"))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("PROPOSAL_ASSIGNMENT_REQUIRED"));
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("PROPOSAL_NOT_FOUND"));
         mockMvc.perform(post("/api/v1/proposals/{publicId}/review-start", acceptedPublicId)
                         .cookie(teacherSession).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
@@ -1224,15 +1303,15 @@ class ApplicationIntegrationTest {
                           AND history.changed_by_user_id = UUID_TO_BIN(?)
                           AND history.support_count_snapshot IS NULL
                         """, Integer.class, acceptedPublicId.toString(), teacher.id().toString())).isZero();
-        // 이 제안의 유효 동의는 작성자 본인의 자동 1표뿐이다. 전이 이력은 그 시점의
-        // 실제 값을 담아야 하며 승격 시 기록된 50을 되풀이해서는 안 된다.
+        // 작성자 자동 동의를 제거했으므로 이 제안의 유효 동의는 0표다. 전이 이력은
+        // 그 시점의 실제 값을 담아야 하며 승격 시 기록된 50을 되풀이해서는 안 된다.
         assertThat(jdbcTemplate.queryForList("""
                         SELECT history.support_count_snapshot FROM proposal_status_history history
                         JOIN proposals proposal ON proposal.id = history.proposal_id
                         WHERE proposal.public_id = UUID_TO_BIN(?)
                           AND history.changed_by_user_id = UUID_TO_BIN(?)
                         """, Integer.class, acceptedPublicId.toString(), teacher.id().toString()))
-                .containsExactly(1, 1, 1, 1);
+                .containsExactly(0, 0, 0, 0);
 
         UUID rejectedPublicId = createFormalProposal(student, "보류 후 반려 검증");
         assignTeacherForTest(rejectedPublicId, teacher);
@@ -1489,6 +1568,11 @@ class ApplicationIntegrationTest {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM identity_reveal_records", Integer.class)).isEqualTo(4);
         assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM security_throttle_states
+                        WHERE throttle_scope = 'IDENTITY_REVEAL_ACCOUNT'
+                          AND failure_count = 1
+                        """, Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject("""
                         SELECT COUNT(DISTINCT revealed_by_user_id) FROM identity_reveal_records
                         """, Integer.class)).isEqualTo(3);
         // 열람 기록에 평문 신원을 남기지 않는다.
@@ -1518,9 +1602,16 @@ class ApplicationIntegrationTest {
                         WHERE public_id = UUID_TO_BIN(?)
                         """,
                 Timestamp.from(Instant.now().minus(Duration.ofHours(25))), identityCaseId.toString());
-        for (Cookie reviewerSession : List.of(teacherSession, presidentSession, viceSession)) {
+        List<Cookie> expiredReviewerSessions = List.of(teacherSession, presidentSession, viceSession);
+        for (int index = 0; index < expiredReviewerSessions.size(); index++) {
+            Cookie reviewerSession = expiredReviewerSessions.get(index);
+            String remoteAddress = "192.0.2." + (index + 1);
             mockMvc.perform(post("/api/v1/identity-reveal-cases/{publicId}/reveal", identityCaseId)
                             .cookie(reviewerSession).with(csrf())
+                            .with(request -> {
+                                request.setRemoteAddr(remoteAddress);
+                                return request;
+                            })
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"reason\":\"만료 후 확인 시도\"}"))
                     .andExpect(status().isConflict())
@@ -1692,47 +1783,54 @@ class ApplicationIntegrationTest {
 
     @Test
     void roleAndOfficeLifecyclesRejectOverlapAndSupportFutureReplacement() throws Exception {
-        createActiveAccount("office.admin", "보직 관리자", "SUPER_ADMIN", "admin secure passphrase");
+        createActiveAccount("office.requester", "보직 요청 관리자", "SUPER_ADMIN", "requester secure passphrase");
+        createActiveAccount("office.approver", "보직 승인 관리자", "SUPER_ADMIN", "approver secure passphrase");
         SeedAccount firstTeacher = createActiveAccount(
                 "first.teacher", "현 학생부장", "TEACHER", "first teacher passphrase");
         SeedAccount nextTeacher = createActiveAccount(
                 "next.teacher", "후임 학생부장", "TEACHER", "next teacher passphrase");
-        Cookie adminSession = requireSessionCookie(login("office.admin", "admin secure passphrase"));
+        Cookie requesterSession = requireSessionCookie(login("office.requester", "requester secure passphrase"));
+        Cookie approverSession = requireSessionCookie(login("office.approver", "approver secure passphrase"));
         Cookie firstTeacherSession = requireSessionCookie(login("first.teacher", "first teacher passphrase"));
 
         mockMvc.perform(post("/api/v1/admin/users/{publicId}/roles", firstTeacher.publicId())
-                        .cookie(adminSession)
+                        .cookie(requesterSession)
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"role\":\"TEACHER\",\"reason\":\"중복 역할 시도\"}"))
+                .andExpect(status().isForbidden());
+
+        UUID duplicateRoleRequest = requestGovernedChange(requesterSession, Map.of(
+                "changeType", "ASSIGN_ROLE",
+                "targetUserPublicId", firstTeacher.publicId(),
+                "role", "TEACHER",
+                "reason", "중복 역할 시도"));
+        mockMvc.perform(post("/api/v1/admin/governance/requests/{publicId}/approve", duplicateRoleRequest)
+                        .cookie(approverSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"중복 역할 거절 확인\"}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("ASSIGNMENT_CONFLICT"));
 
-        mockMvc.perform(post("/api/v1/admin/offices/{office}/appointments", "STUDENT_AFFAIRS_TEACHER")
-                        .cookie(adminSession)
-                        .with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(Map.of(
-                                "userPublicId", firstTeacher.publicId(),
-                                "replaceExistingAtStart", false,
-                                "reason", "현 학생부장 임명"))))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.type").value("STUDENT_AFFAIRS_TEACHER"));
+        UUID firstAppointmentRequest = requestGovernedChange(requesterSession, Map.of(
+                "changeType", "APPOINT_OFFICE",
+                "targetUserPublicId", firstTeacher.publicId(),
+                "office", "STUDENT_AFFAIRS_TEACHER",
+                "replaceExistingAtStart", false,
+                "reason", "현 학생부장 임명"));
+        approveGovernedChange(approverSession, firstAppointmentRequest);
         mockMvc.perform(get("/api/v1/auth/me").cookie(firstTeacherSession))
                 .andExpect(status().isUnauthorized());
 
         Instant replacementStartsAt = Instant.now().plusSeconds(86_400).truncatedTo(ChronoUnit.MICROS);
-        mockMvc.perform(post("/api/v1/admin/offices/{office}/appointments", "STUDENT_AFFAIRS_TEACHER")
-                        .cookie(adminSession)
-                        .with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(Map.of(
-                                "userPublicId", nextTeacher.publicId(),
-                                "startsAt", replacementStartsAt,
-                                "replaceExistingAtStart", true,
-                                "reason", "다음 학기 후임 예약"))))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.startsAt").value(replacementStartsAt.toString()));
+        UUID replacementRequest = requestGovernedChange(requesterSession, Map.of(
+                "changeType", "APPOINT_OFFICE",
+                "targetUserPublicId", nextTeacher.publicId(),
+                "office", "STUDENT_AFFAIRS_TEACHER",
+                "startsAt", replacementStartsAt,
+                "replaceExistingAtStart", true,
+                "reason", "다음 학기 후임 예약"));
+        approveGovernedChange(approverSession, replacementRequest);
 
         Timestamp firstEndsAt = jdbcTemplate.queryForObject("""
                         SELECT ends_at FROM office_assignments
@@ -1745,34 +1843,63 @@ class ApplicationIntegrationTest {
                         WHERE office_type = 'STUDENT_AFFAIRS_TEACHER'
                         """, Integer.class)).isEqualTo(2);
         mockMvc.perform(get("/api/v1/admin/users/{publicId}", firstTeacher.publicId())
-                        .cookie(adminSession))
+                        .cookie(requesterSession))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("ACTIVE"))
                 .andExpect(jsonPath("$.roles[0].role").value("TEACHER"))
                 .andExpect(jsonPath("$.offices[0].office").value("STUDENT_AFFAIRS_TEACHER"))
                 .andExpect(jsonPath("$.offices[0].endReason").value("다음 학기 후임 예약"));
 
-        mockMvc.perform(post("/api/v1/admin/users/{publicId}/roles/{role}/end",
-                                firstTeacher.publicId(), "TEACHER")
-                        .cookie(adminSession)
-                        .with(csrf())
+        UUID endRoleRequest = requestGovernedChange(requesterSession, Map.of(
+                "changeType", "END_ROLE",
+                "targetUserPublicId", firstTeacher.publicId(),
+                "role", "TEACHER",
+                "reason", "역할 선종료 시도"));
+        mockMvc.perform(post("/api/v1/admin/governance/requests/{publicId}/approve", endRoleRequest)
+                        .cookie(approverSession).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"reason\":\"역할 선종료 시도\"}"))
+                        .content("{\"reason\":\"보직 유지 중 역할 종료 거절 확인\"}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("ASSIGNMENT_CONFLICT"));
 
         SeedAccount student = createActiveAccount(
                 "office.student", "일반 학생", "STUDENT", "student office passphrase");
-        mockMvc.perform(post("/api/v1/admin/offices/{office}/appointments", "STUDENT_AFFAIRS_TEACHER")
-                        .cookie(adminSession)
-                        .with(csrf())
+        UUID invalidOfficeRequest = requestGovernedChange(requesterSession, Map.of(
+                "changeType", "APPOINT_OFFICE",
+                "targetUserPublicId", student.publicId(),
+                "office", "STUDENT_AFFAIRS_TEACHER",
+                "startsAt", replacementStartsAt.plusSeconds(86_400),
+                "replaceExistingAtStart", true,
+                "reason", "역할 불일치 시도"));
+        mockMvc.perform(post("/api/v1/admin/governance/requests/{publicId}/approve", invalidOfficeRequest)
+                        .cookie(approverSession).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(Map.of(
-                                "userPublicId", student.publicId(),
-                                "startsAt", replacementStartsAt.plusSeconds(86_400),
-                                "replaceExistingAtStart", true,
-                                "reason", "역할 불일치 시도"))))
+                        .content("{\"reason\":\"역할 불일치 거절 확인\"}"))
                 .andExpect(status().isConflict());
+    }
+
+    private UUID requestGovernedChange(Cookie requesterSession, Map<String, Object> request) throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/admin/governance/requests")
+                        .cookie(requesterSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.code").doesNotExist())
+                .andReturn();
+        return UUID.fromString(
+                objectMapper.readTree(created.getResponse().getContentAsString()).get("publicId").asText());
+    }
+
+    private MvcResult approveGovernedChange(Cookie approverSession, UUID requestPublicId) throws Exception {
+        return mockMvc.perform(post("/api/v1/admin/governance/requests/{publicId}/approve", requestPublicId)
+                        .cookie(approverSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"독립 승인 완료\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("EXECUTED"))
+                .andExpect(jsonPath("$.code").doesNotExist())
+                .andReturn();
     }
 
     private MvcResult login(String loginId, String password) throws Exception {

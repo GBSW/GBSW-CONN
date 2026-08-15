@@ -86,12 +86,17 @@ public class AccountLifecycleService {
             String reason,
             String traceId
     ) {
+        kr.hs.gbsw.communication.governance.service.GovernanceExecutionContext.requireActive();
         recentAuthenticationGuard.requireRecent(actor);
         Instant now = clock.instant();
         Instant startsAt = effectiveStart(requestedStart, now);
         validatePeriod(startsAt, endsAt);
         AccountRecord account = lockAccount(publicId);
         ensureAssignableAccount(account);
+        if (role == AccountRole.SUPER_ADMIN
+                && repository.hasOverlappingModerationOfficeAssignment(account.id(), startsAt, endsAt)) {
+            throw new AssignmentConflictException("심의 보직 보유 기간에는 슈퍼 어드민 역할을 부여할 수 없습니다.");
+        }
         if (!repository.lockOverlappingRoleAssignments(account.id(), role, startsAt, endsAt).isEmpty()) {
             throw new AssignmentConflictException("같은 역할의 임기가 이미 해당 기간과 겹칩니다.");
         }
@@ -112,6 +117,7 @@ public class AccountLifecycleService {
             String reason,
             String traceId
     ) {
+        kr.hs.gbsw.communication.governance.service.GovernanceExecutionContext.requireActive();
         recentAuthenticationGuard.requireRecent(actor);
         Instant now = clock.instant();
         Instant effectiveEnd = effectiveEnd(requestedEnd, now);
@@ -147,12 +153,22 @@ public class AccountLifecycleService {
             String reason,
             String traceId
     ) {
+        kr.hs.gbsw.communication.governance.service.GovernanceExecutionContext.requireActive();
         recentAuthenticationGuard.requireRecent(actor);
         Instant now = clock.instant();
         Instant startsAt = effectiveStart(requestedStart, now);
         validatePeriod(startsAt, endsAt);
         AccountRecord account = lockAccount(publicId);
         ensureAssignableAccount(account);
+        repository.lockModerationOfficeSeat(office);
+        if (repository.hasOverlappingRoleAssignment(
+                account.id(), AccountRole.SUPER_ADMIN, startsAt, endsAt)) {
+            throw new AssignmentConflictException("슈퍼 어드민은 심의 보직을 겸할 수 없습니다.");
+        }
+        if (repository.hasOverlappingOtherModerationOfficeAssignment(
+                account.id(), office, startsAt, endsAt)) {
+            throw new AssignmentConflictException("한 사용자는 같은 기간에 둘 이상의 심의 보직을 맡을 수 없습니다.");
+        }
         if (!startsAt.isAfter(now) && account.status() != AccountStatus.ACTIVE) {
             throw new AccountStateConflictException("현재 보직은 활성 계정에만 임명할 수 있습니다.");
         }
@@ -193,10 +209,12 @@ public class AccountLifecycleService {
             String reason,
             String traceId
     ) {
+        kr.hs.gbsw.communication.governance.service.GovernanceExecutionContext.requireActive();
         recentAuthenticationGuard.requireRecent(actor);
         Instant now = clock.instant();
         Instant effectiveEnd = effectiveEnd(requestedEnd, now);
         AccountRecord account = lockAccount(publicId);
+        repository.lockModerationOfficeSeat(office);
         List<OfficeAssignmentRecord> assignments =
                 repository.lockOfficeAssignmentAt(account.id(), office, effectiveEnd);
         if (assignments.size() != 1) {

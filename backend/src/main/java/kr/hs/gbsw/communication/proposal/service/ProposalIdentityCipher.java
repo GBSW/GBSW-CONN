@@ -10,6 +10,7 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import kr.hs.gbsw.communication.proposal.config.IdentityVaultProperties;
 import kr.hs.gbsw.communication.proposal.domain.EncryptedProposalIdentity;
+import kr.hs.gbsw.communication.proposal.exception.IdentityKeyUnavailableException;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -27,30 +28,34 @@ public class ProposalIdentityCipher {
 
     public EncryptedProposalIdentity encrypt(UUID proposalPublicId, UUID userId) {
         byte[] nonce = new byte[NONCE_BYTES];
+        byte[] key = properties.activeKey();
+        byte[] plaintext = uuidBytes(userId);
         secureRandom.nextBytes(nonce);
         try {
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(
                     Cipher.ENCRYPT_MODE,
-                    new SecretKeySpec(properties.key(), "AES"),
+                    new SecretKeySpec(key, "AES"),
                     new GCMParameterSpec(TAG_BITS, nonce));
             cipher.updateAAD(uuidBytes(proposalPublicId));
-            byte[] ciphertext = cipher.doFinal(uuidBytes(userId));
-            return new EncryptedProposalIdentity(ciphertext, nonce, properties.keyVersion());
+            byte[] ciphertext = cipher.doFinal(plaintext);
+            return new EncryptedProposalIdentity(ciphertext, nonce, properties.activeKeyVersion());
         } catch (GeneralSecurityException exception) {
             throw new IllegalStateException("Proposal identity encryption failed", exception);
+        } finally {
+            Arrays.fill(key, (byte) 0);
+            Arrays.fill(plaintext, (byte) 0);
         }
     }
 
     public UUID decrypt(UUID proposalPublicId, EncryptedProposalIdentity identity) {
-        if (identity.keyVersion() != properties.keyVersion()) {
-            throw new IllegalStateException("Unsupported proposal identity key version");
-        }
+        byte[] key = properties.keyForVersion(identity.keyVersion())
+                .orElseThrow(() -> new IdentityKeyUnavailableException(identity.keyVersion()));
         try {
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(
                     Cipher.DECRYPT_MODE,
-                    new SecretKeySpec(properties.key(), "AES"),
+                    new SecretKeySpec(key, "AES"),
                     new GCMParameterSpec(TAG_BITS, identity.nonce()));
             cipher.updateAAD(uuidBytes(proposalPublicId));
             byte[] plaintext = cipher.doFinal(identity.ciphertext());
@@ -65,6 +70,8 @@ public class ProposalIdentityCipher {
             }
         } catch (GeneralSecurityException exception) {
             throw new IllegalStateException("Proposal identity decryption failed", exception);
+        } finally {
+            Arrays.fill(key, (byte) 0);
         }
     }
 

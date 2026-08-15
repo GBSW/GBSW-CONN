@@ -44,7 +44,7 @@ public class ModerationCaseService {
 
     @Transactional(readOnly = true)
     public List<ContentReportRecord> reports(AuthPrincipal actor, int size) {
-        requireCurrentStudentAffairsTeacher(actor, clock.instant());
+        requireCurrentReviewerOffice(actor, clock.instant());
         return repository.findInboxReports(size);
     }
 
@@ -57,7 +57,7 @@ public class ModerationCaseService {
             String traceId
     ) {
         Instant now = clock.instant();
-        requireCurrentStudentAffairsTeacher(actor, now);
+        requireCurrentReviewerOffice(actor, now);
         LockedContentReport report = repository.lockReport(reportPublicId)
                 .orElseThrow(ModerationNotFoundException::new);
         if (repository.existsCase(report.proposalId(), type)) {
@@ -96,12 +96,21 @@ public class ModerationCaseService {
                 .orElseThrow(ModerationNotFoundException::new);
     }
 
-    private void requireCurrentStudentAffairsTeacher(AuthPrincipal actor, Instant now) {
-        if (!actor.authorities().contains("ROLE_TEACHER")
-                || !actor.authorities().contains("OFFICE_STUDENT_AFFAIRS_TEACHER")
-                || !repository.isCurrentOffice(actor.userId(), OfficeType.STUDENT_AFFAIRS_TEACHER, now)) {
-            throw new AccessDeniedException("Only the current student affairs teacher may create cases");
+    private void requireCurrentReviewerOffice(AuthPrincipal actor, Instant now) {
+        boolean allowed = REQUIRED_OFFICES.stream().anyMatch(office ->
+                hasRequiredRole(actor, office)
+                        && actor.authorities().contains("OFFICE_" + office.name())
+                        && repository.isCurrentOffice(actor.userId(), office, now));
+        if (!allowed) {
+            throw new AccessDeniedException("A current moderation office holder is required");
         }
+    }
+
+    private boolean hasRequiredRole(AuthPrincipal actor, OfficeType office) {
+        String requiredRole = office == OfficeType.STUDENT_AFFAIRS_TEACHER
+                ? "ROLE_TEACHER"
+                : "ROLE_STUDENT";
+        return actor.authorities().contains(requiredRole);
     }
 
     private void requireReviewerAuthority(AuthPrincipal actor) {
@@ -117,9 +126,8 @@ public class ModerationCaseService {
                 .map(ReviewerSnapshotCandidate::office)
                 .collect(java.util.stream.Collectors.toSet());
         long distinctUsers = reviewers.stream().map(ReviewerSnapshotCandidate::userId).distinct().count();
-        boolean actorIncluded = reviewers.stream().anyMatch(reviewer ->
-                reviewer.office() == OfficeType.STUDENT_AFFAIRS_TEACHER
-                        && reviewer.userId().equals(actor.userId()));
+        boolean actorIncluded = reviewers.stream()
+                .anyMatch(reviewer -> reviewer.userId().equals(actor.userId()));
         if (reviewers.size() != 3 || distinctUsers != 3
                 || !offices.equals(REQUIRED_OFFICES) || !actorIncluded) {
             throw new ReviewerConfigurationException();

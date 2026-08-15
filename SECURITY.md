@@ -86,6 +86,8 @@ MySQL 데이터 모델, 테스트와 CI 설정에 적용됩니다.
 - 실제 CODEOWNERS와 비공개 신고 채널이 정해지기 전에는 공개 운영하지 않습니다.
 - 시험은 Testcontainers와 가짜 데이터 기반 환경에서 수행합니다.
 - 프런트엔드는 요청별 nonce CSP를 사용하며 일반 사용자 HTML 실행을 허용하지 않습니다.
+- 저장소의 Dockerfile과 Compose 파일은 검토 가능한 참조 산출물일 뿐 운영 승인이나 외부 통제 완료를 의미하지 않습니다.
+- GitHub Action 커밋 SHA, Gradle 배포본 체크섬과 의존성 검증 메타데이터가 검증되기 전에는 공급망 릴리스 게이트가 닫힌 상태입니다.
 
 ## Maintainer Response and Coordinated Disclosure
 

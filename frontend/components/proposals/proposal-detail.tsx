@@ -59,11 +59,42 @@ export function ProposalDetail({ publicId }: { publicId: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [withdrawPending, setWithdrawPending] = useState(false);
+  const [reloadVersion, setReloadVersion] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  function showUnavailable() {
+    setProposal(null);
+    setError(null);
+    setNotice(null);
+    setWithdrawOpen(false);
+    setState("not-found");
+  }
+
+  function showSignedOut() {
+    setProposal(null);
+    setError(null);
+    setNotice(null);
+    setWithdrawOpen(false);
+    setState("signed-out");
+  }
+
+  function handleFatalError(caught: unknown): boolean {
+    if (caught instanceof ApiRequestError && caught.code === "PROPOSAL_NOT_FOUND") {
+      showUnavailable();
+      return true;
+    }
+    if (caught instanceof ApiRequestError && ["AUTHENTICATION_REQUIRED", "SESSION_INVALIDATED"].includes(caught.code)) {
+      showSignedOut();
+      return true;
+    }
+    return false;
+  }
 
   useEffect(() => {
     let active = true;
-    Promise.all([apiGet<CurrentUser>("/api/v1/auth/me"), apiGet<ProposalDetailResponse>(`/api/v1/proposals/${publicId}`)])
-      .then(([currentUser, response]) => {
+    apiGet<CurrentUser>("/api/v1/auth/me")
+      .then(async (currentUser) => {
+        const response = await apiGet<ProposalDetailResponse>(`/api/v1/proposals/${publicId}`);
         if (!active) return;
         setUser(currentUser);
         setProposal(response);
@@ -73,10 +104,21 @@ export function ProposalDetail({ publicId }: { publicId: string }) {
         if (!active) return;
         if (caught instanceof ApiRequestError && caught.code === "PROPOSAL_NOT_FOUND") setState("not-found");
         else if (caught instanceof ApiRequestError && ["AUTHENTICATION_REQUIRED", "SESSION_INVALIDATED"].includes(caught.code)) setState("signed-out");
-        else setState("error");
+        else {
+          setLoadError(errorMessage(caught));
+          setState("error");
+        }
       });
     return () => { active = false; };
-  }, [publicId]);
+  }, [publicId, reloadVersion]);
+
+  async function refreshProposal() {
+    try {
+      setProposal(await apiGet<ProposalDetailResponse>(`/api/v1/proposals/${publicId}`));
+    } catch (caught) {
+      if (!handleFatalError(caught)) throw caught;
+    }
+  }
 
   async function changeSupport() {
     if (!proposal) return;
@@ -94,7 +136,7 @@ export function ProposalDetail({ publicId }: { publicId: string }) {
       } : current);
       setNotice(result.justFormalized ? "50명의 동의에 도달해 정식 안건으로 승격되었습니다." : result.supported ? "이 제안에 동의했습니다." : "동의를 철회했습니다.");
     } catch (caught) {
-      setError(errorMessage(caught));
+      if (!handleFatalError(caught)) setError(errorMessage(caught));
     } finally {
       setActionPending(false);
     }
@@ -109,7 +151,7 @@ export function ProposalDetail({ publicId }: { publicId: string }) {
       router.replace("/proposals");
       router.refresh();
     } catch (caught) {
-      setError(errorMessage(caught));
+      if (!handleFatalError(caught)) setError(errorMessage(caught));
       setWithdrawOpen(false);
       setWithdrawPending(false);
     }
@@ -117,8 +159,29 @@ export function ProposalDetail({ publicId }: { publicId: string }) {
 
   if (state === "loading") return <Spinner size="lg" label="제안을 불러오고 있습니다…" />;
   if (state === "signed-out") return <EmptyState title="로그인이 필요합니다" actions={<Button label="로그인" href="/login" variant="primary" />} headingLevel={1} />;
-  if (state === "not-found") return <EmptyState title="제안을 찾을 수 없습니다" description="삭제되었거나 현재 계정에 공개되지 않은 제안입니다." actions={<Button label="제안 목록으로" href="/proposals" />} headingLevel={1} />;
-  if (state === "error" || !proposal) return <Banner status="error" title="제안을 불러오지 못했습니다" description="잠시 후 다시 시도해 주세요." />;
+  if (state === "not-found") return <EmptyState title="제안을 찾을 수 없습니다" description="존재하지 않거나 현재 계정에서 접근할 수 없는 제안입니다." actions={<Button label="제안 목록으로" href="/proposals" />} headingLevel={1} />;
+  if (state === "error" || !proposal) return (
+    <EmptyState
+      title="제안을 불러오지 못했습니다"
+      description={loadError ?? "잠시 후 다시 시도해 주세요."}
+      actions={(
+        <HStack gap={2} wrap="wrap">
+          <Button
+            label="다시 시도"
+            variant="primary"
+            onClick={() => {
+              setState("loading");
+              setProposal(null);
+              setLoadError(null);
+              setReloadVersion((value) => value + 1);
+            }}
+          />
+          <Button label="제안 목록으로" href="/proposals" variant="secondary" />
+        </HStack>
+      )}
+      headingLevel={1}
+    />
+  );
 
   const student = user?.roles.includes("STUDENT") ?? false;
   const teacher = user?.roles.includes("TEACHER") ?? false;
@@ -170,7 +233,7 @@ export function ProposalDetail({ publicId }: { publicId: string }) {
 
       <ProposalComments publicId={publicId} canComment={student} />
 
-      <ProposalReportForm publicId={publicId} />
+      {student ? <ProposalReportForm publicId={publicId} onUnavailable={showUnavailable} onSignedOut={showSignedOut} /> : null}
 
       <VStack as="section" gap={4} aria-labelledby="responses-title">
         <VStack gap={1}>
@@ -202,7 +265,13 @@ export function ProposalDetail({ publicId }: { publicId: string }) {
       </VStack>
 
       {proposal.viewerCanManage ? (
-        <ProposalWorkflowPanel publicId={publicId} workflowStatus={proposal.workflowStatus} onUpdated={async () => setProposal(await apiGet<ProposalDetailResponse>(`/api/v1/proposals/${publicId}`))} />
+        <ProposalWorkflowPanel
+          publicId={publicId}
+          workflowStatus={proposal.workflowStatus}
+          onUpdated={refreshProposal}
+          onUnavailable={showUnavailable}
+          onSignedOut={showSignedOut}
+        />
       ) : teacher && !gathering ? <Banner status="info" title="담당 교사만 변경할 수 있습니다" description="내부 지정된 담당 교사만 이 안건의 상태와 공식 답변을 변경할 수 있습니다." /> : null}
 
       <VStack as="section" gap={3} aria-labelledby="history-title">

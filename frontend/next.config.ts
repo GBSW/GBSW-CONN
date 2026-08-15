@@ -3,6 +3,7 @@ import type { NextConfig } from "next";
 const backendUrl = process.env.BACKEND_INTERNAL_URL ?? "http://localhost:8080";
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   async headers() {
     return [
       {
@@ -17,6 +18,9 @@ const nextConfig: NextConfig = {
     ];
   },
   async rewrites() {
+    if (process.env.NODE_ENV === "production") {
+      return [];
+    }
     return [
       {
         source: "/api/:path*",

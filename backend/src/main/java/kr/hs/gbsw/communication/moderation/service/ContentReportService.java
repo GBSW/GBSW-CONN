@@ -56,7 +56,7 @@ public class ContentReportService {
             throw new AccessDeniedException("Content reporting requires a current student or teacher role");
         }
 
-        LockedProposal proposal = proposalRepository.lockByPublicId(proposalPublicId)
+        LockedProposal proposal = proposalRepository.lockReportableByPublicId(proposalPublicId)
                 .orElseThrow(ProposalNotFoundException::new);
         // 임시 가림은 확정 결정이 아니므로 신고를 계속 받는다. 신고가 임계값을 함께
         // 넘긴 동시 요청에서 뒤늦은 신고가 유실되지 않고, 심의자가 보는 신고 수도

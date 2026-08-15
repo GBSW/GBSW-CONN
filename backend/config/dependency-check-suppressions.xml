@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+  <!--
+    Suppressions require a vulnerability ID, evidence, owner, and expiration date.
+    Keep this file empty unless a reviewed false positive cannot be fixed upstream.
+  -->
+</suppressions>

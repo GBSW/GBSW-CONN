@@ -64,9 +64,7 @@ public class IdentityRevealService {
             String remoteAddress,
             String traceId
     ) {
-        // 열람 자격은 역할이 아니라 사건 생성 시점에 고정된 심의자인지로 판단한다.
-        // 학생회장과 부회장은 학생 역할이므로 교사 역할을 요구하면 명세를 만족할 수 없다.
-        // 실제 심의자 확인은 아래 lockCaseForReviewer가 담당한다.
+        IdentityRevealAuthorizationPolicy.requireAllowed(actor);
         recentAuthenticationGuard.requireRecent(actor);
         Instant now = clock.instant();
         try {

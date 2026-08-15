@@ -25,8 +25,11 @@ const project = `gbsw-e2e-${process.pid}-${Date.now()}`;
 const mysqlPort = await availablePort();
 const backendPort = await availablePort();
 const frontendPort = await availablePort();
+const credentialDeliveryPort = await availablePort();
 const databasePassword = randomBytes(24).toString("hex");
 const rootPassword = randomBytes(24).toString("hex");
+const credentialDeliveryToken = randomBytes(32).toString("hex");
+const credentialDeliveryDirectory = join(temporaryDir, "credential-deliveries");
 const sharedEnvironment = {
   ...process.env,
   E2E_MYSQL_PORT: String(mysqlPort),
@@ -44,11 +47,16 @@ const backendEnvironment = applyJavaHome({
   SWAGGER_UI_ENABLED: "false",
   LOGIN_FAILURES_BEFORE_DELAY: "100",
   GENERAL_REQUESTS_PER_MINUTE: "1000",
+  AUTHENTICATION_REQUESTS_PER_MINUTE: "1000",
   REAUTHENTICATION_TTL: "2h",
   THROTTLE_FINGERPRINT_SECRET: randomBytes(32).toString("hex"),
   PROPOSAL_IDENTITY_KEY_BASE64: randomBytes(32).toString("base64"),
   PROPOSAL_IDENTITY_KEY_VERSION: "1",
+  PROPOSAL_OWNERSHIP_KEY_BASE64: randomBytes(32).toString("base64"),
+  PROPOSAL_OWNERSHIP_KEY_VERSION: "1",
   PROPOSAL_SUPPORT_THRESHOLD: "50",
+  CREDENTIAL_DELIVERY_ENDPOINT: `http://127.0.0.1:${credentialDeliveryPort}/deliver`,
+  CREDENTIAL_DELIVERY_BEARER_TOKEN: credentialDeliveryToken,
 });
 const children = [];
 let composeStarted = false;
@@ -56,6 +64,21 @@ let composeStarted = false;
 try {
   run("docker", ["compose", "-p", project, "-f", composeFile, "up", "-d", "--wait", "--wait-timeout", "120"], rootDir, sharedEnvironment);
   composeStarted = true;
+
+  const credentialDelivery = start(
+    "node",
+    ["scripts/e2e-credential-sink.mjs"],
+    frontendDir,
+    {
+      ...process.env,
+      E2E_CREDENTIAL_DELIVERY_PORT: String(credentialDeliveryPort),
+      E2E_CREDENTIAL_DELIVERY_TOKEN: credentialDeliveryToken,
+      E2E_CREDENTIAL_DELIVERY_DIR: credentialDeliveryDirectory,
+    },
+    join(temporaryDir, "credential-delivery.log"),
+  );
+  children.push(credentialDelivery);
+  await waitFor(`http://127.0.0.1:${credentialDeliveryPort}/health`, 30_000);
 
   run("./gradlew", ["bootstrapSuperAdmin", "--no-daemon"], backendDir, {
     ...backendEnvironment,
@@ -84,6 +107,7 @@ try {
       E2E_BOOTSTRAP_FILE: bootstrapFile,
       E2E_DATA_FILE: dataFile,
       E2E_STATE_DIR: stateDir,
+      E2E_DELIVERY_DIR: credentialDeliveryDirectory,
     },
     stdio: "inherit",
   });

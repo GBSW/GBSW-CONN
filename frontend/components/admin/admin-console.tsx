@@ -4,9 +4,9 @@ import type { components } from "@/lib/api-schema";
 import { ApiRequestError, apiGet, apiPost, errorMessage } from "@/lib/api-client";
 import type { AccountRole, OfficeType } from "@/lib/roles";
 import { officeLabels, offices, roleLabels, roles } from "@/lib/roles";
+import { GovernanceRequestConsole } from "@/components/admin/governance-request-console";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { Card } from "@astryxdesign/core/Card";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { Collapsible, CollapsibleGroup } from "@astryxdesign/core/Collapsible";
 import { DateTimeInput, type ISODateTimeString } from "@astryxdesign/core/DateTimeInput";
@@ -30,13 +30,13 @@ type CurrentUser = components["schemas"]["CurrentUserResponse"];
 type AccountPage = components["schemas"]["AccountPageResponse"];
 type AccountDetail = components["schemas"]["AccountDetailResponse"];
 type CreateAccountRequest = components["schemas"]["CreateAccountRequest"];
-type OneTimeCode = components["schemas"]["OneTimeCodeResponse"];
 type ReauthenticationRequest = components["schemas"]["ReauthenticationRequest"];
 type RoleAssignmentRequest = components["schemas"]["RoleAssignmentRequest"];
 type OfficeAppointmentRequest = components["schemas"]["OfficeAppointmentRequest"];
 type EndAssignmentRequest = components["schemas"]["EndAssignmentRequest"];
 type AccountStatus = "" | "PENDING_ACTIVATION" | "ACTIVE" | "SUSPENDED" | "DEACTIVATED";
 type AdminConsoleMode = "accounts" | "create" | "offices";
+type GovernanceRequestResponse = { publicId: string; changeType: string; status: string; expiresAt: string };
 
 const statusLabels: Record<string, string> = {
   PENDING_ACTIVATION: "활성화 대기",
@@ -117,7 +117,6 @@ export function AdminConsole({ mode = "accounts" }: { mode?: AdminConsoleMode })
   const [detailLoading, setDetailLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [codeNotice, setCodeNotice] = useState<{ title: string; value: OneTimeCode } | null>(null);
   const [showReauthentication, setShowReauthentication] = useState(false);
   const [actionPending, setActionPending] = useState(false);
   const [refreshVersion, setRefreshVersion] = useState(0);
@@ -259,15 +258,12 @@ export function AdminConsole({ mode = "accounts" }: { mode?: AdminConsoleMode })
       reason: formText(form, "reason"),
     };
     void execute(
-      () => apiPost<OneTimeCode>("/api/v1/admin/users", request),
-      "계정을 만들었습니다.",
-      (result) => {
-        setCodeNotice({ title: "가입 코드", value: result });
-        if (result.userPublicId) {
-          setDetail(null);
-          setDetailLoading(true);
-          setSelectedId(result.userPublicId);
-        }
+      () => apiPost<GovernanceRequestResponse>("/api/v1/admin/governance/requests", {
+        changeType: "CREATE_ACCOUNT",
+        ...request,
+      }),
+      "계정 생성 승인 요청을 등록했습니다.",
+      () => {
         formElement.reset();
       },
     );
@@ -277,14 +273,12 @@ export function AdminConsole({ mode = "accounts" }: { mode?: AdminConsoleMode })
     if (!selectedId) return;
     const activation = kind === "activation";
     void execute(
-      () => apiPost<OneTimeCode>(
-        `/api/v1/admin/users/${selectedId}/${activation ? "activation-code" : "password-reset-code"}`,
-      ),
-      activation ? "가입 코드를 재발급했습니다." : "비밀번호 재설정 코드를 발급했습니다.",
-      (result) => setCodeNotice({
-        title: activation ? "새 가입 코드" : "비밀번호 재설정 코드",
-        value: result,
+      () => apiPost<GovernanceRequestResponse>("/api/v1/admin/governance/requests", {
+        changeType: activation ? "REISSUE_ACTIVATION_CODE" : "ISSUE_PASSWORD_RESET_CODE",
+        targetUserPublicId: selectedId,
+        reason: activation ? "가입 코드 재발급" : "비밀번호 재설정 코드 발급",
       }),
+      activation ? "가입 코드 재발급 승인 요청을 등록했습니다." : "비밀번호 재설정 코드 발급 승인 요청을 등록했습니다.",
     );
   }
 
@@ -312,8 +306,8 @@ export function AdminConsole({ mode = "accounts" }: { mode?: AdminConsoleMode })
       reason: formText(form, "reason"),
     };
     void execute(
-      () => apiPost(`/api/v1/admin/users/${selectedId}/roles`, request),
-      "역할 임기를 추가했습니다.",
+      () => apiPost("/api/v1/admin/governance/requests", { changeType: "ASSIGN_ROLE", targetUserPublicId: selectedId, ...request }),
+      "역할 추가 승인 요청을 등록했습니다.",
       () => formElement.reset(),
     );
   }
@@ -329,8 +323,8 @@ export function AdminConsole({ mode = "accounts" }: { mode?: AdminConsoleMode })
       reason: formText(form, "reason"),
     };
     void execute(
-      () => apiPost(`/api/v1/admin/users/${selectedId}/roles/${role}/end`, request),
-      "역할 임기를 종료했습니다.",
+      () => apiPost("/api/v1/admin/governance/requests", { changeType: "END_ROLE", targetUserPublicId: selectedId, role, ...request }),
+      "역할 종료 승인 요청을 등록했습니다.",
       () => formElement.reset(),
     );
   }
@@ -349,8 +343,8 @@ export function AdminConsole({ mode = "accounts" }: { mode?: AdminConsoleMode })
       reason: formText(form, "reason"),
     };
     void execute(
-      () => apiPost(`/api/v1/admin/offices/${office}/appointments`, request),
-      "보직 임기를 추가했습니다.",
+      () => apiPost("/api/v1/admin/governance/requests", { changeType: "APPOINT_OFFICE", office, targetUserPublicId: selectedId, ...request }),
+      "보직 임명 승인 요청을 등록했습니다.",
       () => formElement.reset(),
     );
   }
@@ -366,8 +360,8 @@ export function AdminConsole({ mode = "accounts" }: { mode?: AdminConsoleMode })
       reason: formText(form, "reason"),
     };
     void execute(
-      () => apiPost(`/api/v1/admin/offices/${office}/users/${selectedId}/end`, request),
-      "보직 임기를 종료했습니다.",
+      () => apiPost("/api/v1/admin/governance/requests", { changeType: "END_OFFICE", office, targetUserPublicId: selectedId, ...request }),
+      "보직 종료 승인 요청을 등록했습니다.",
       () => formElement.reset(),
     );
   }
@@ -402,24 +396,12 @@ export function AdminConsole({ mode = "accounts" }: { mode?: AdminConsoleMode })
 
       {actionError ? <Banner status="error" title="작업을 완료할 수 없습니다" description={actionError} /> : null}
       {notice ? <Banner status="success" title={notice} /> : null}
-      {codeNotice ? (
-        <Card padding={6} variant="yellow" elevation="med">
-          <HStack hAlign="between" vAlign="center" gap={4} wrap="wrap">
-            <VStack gap={2}>
-              <Heading level={2}>{codeNotice.title} · 한 번만 표시</Heading>
-              <Text type="code" as="p" className="wrap-anywhere">{codeNotice.value.code}</Text>
-              <Text as="p">만료: {formatInstant(codeNotice.value.expiresAt)}</Text>
-              <Text type="supporting" as="p">안전한 경로로 당사자에게 전달한 뒤 이 화면에서 지워 주세요.</Text>
-            </VStack>
-            <Button label="코드 지우기" variant="destructive" onClick={() => setCodeNotice(null)} />
-          </HStack>
-        </Card>
-      ) : null}
+      <GovernanceRequestConsole />
 
       {mode === "create" ? <VStack as="section" gap={4} aria-labelledby="create-title">
         <VStack gap={1} maxWidth="72ch">
           <Heading level={2} id="create-title">새 계정 만들기</Heading>
-          <Text as="p" color="secondary">활성화 대기 계정과 첫 역할을 만들고 가입 코드를 한 번 발급합니다.</Text>
+          <Text as="p" color="secondary">계정 생성 요청은 다른 슈퍼 어드민의 승인 후 실행되며 가입 코드는 검증된 수신자 채널로만 전달됩니다.</Text>
         </VStack>
         <Section variant="section" padding={5}>
           <form onSubmit={createAccount}>
@@ -430,7 +412,7 @@ export function AdminConsole({ mode = "accounts" }: { mode?: AdminConsoleMode })
                 <FormSelect label="첫 역할" name="role" options={roleOptions} initial="STUDENT" />
               </HStack>
               <FormArea label="발급 사유" name="reason" />
-              <Button label="계정 만들기" type="submit" variant="primary" isLoading={actionPending} isDisabled={actionPending} />
+              <Button label="계정 생성 승인 요청" type="submit" variant="primary" isLoading={actionPending} isDisabled={actionPending} />
             </VStack>
           </form>
         </Section>

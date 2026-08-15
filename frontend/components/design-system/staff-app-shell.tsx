@@ -47,7 +47,7 @@ export function StaffAppShell({ children, requires }: { children: ReactNode; req
       ) : null}
       {reviewer ? (
         <SideNavSection title="보호 심의">
-          <SideNavItem label="심의 사건" href="/moderation" isSelected={pathname.startsWith("/moderation")} />
+          <SideNavItem label="신고 접수함·심의 사건" href="/moderation" isSelected={pathname.startsWith("/moderation")} />
         </SideNavSection>
       ) : null}
     </SideNav>
@@ -69,12 +69,12 @@ export function StaffAppShell({ children, requires }: { children: ReactNode; req
       height="fill"
       variant="section"
     >
-      {allowed ? children : <StaffAccessNotice status={status} requires={requires} />}
+      {allowed ? children : <StaffAccessNotice status={status} requires={requires} admin={admin} />}
     </AppShell>
   );
 }
 
-function StaffAccessNotice({ status, requires }: { status: string; requires: StaffAccess }) {
+function StaffAccessNotice({ status, requires, admin }: { status: string; requires: StaffAccess; admin: boolean }) {
   const homeButton = <Button label="서비스 홈" href="/" variant="secondary" />;
 
   if (status === "loading") {
@@ -115,12 +115,19 @@ function StaffAccessNotice({ status, requires }: { status: string; requires: Sta
         description={
           requires === "admin"
             ? "이 화면은 슈퍼 어드민 계정만 사용할 수 있습니다."
-            : "이 화면은 학생부장교사·학생회장·학생부회장 보직만 사용할 수 있습니다."
+            : admin
+              ? "슈퍼 관리자 권한만으로는 신고 원문을 볼 수 없습니다. 교사 계정에 학생부장교사 보직을 지정한 뒤 해당 계정으로 로그인해 주세요."
+              : "이 화면은 학생부장교사·학생회장·학생부회장 보직만 사용할 수 있습니다."
         }
         headingLevel={1}
         actions={
           <HStack gap={2} wrap="wrap">
-            <Button label="내 대시보드" href="/dashboard" variant="primary" />
+            {requires === "reviewer" && admin ? (
+              <Button label="학생부장교사 보직 지정" href="/admin/offices" variant="primary" />
+            ) : (
+              <Button label="내 대시보드" href="/dashboard" variant="primary" />
+            )}
+            {requires === "reviewer" && admin ? <Button label="교사 계정 만들기" href="/admin/accounts/new" variant="secondary" /> : null}
             {homeButton}
           </HStack>
         }

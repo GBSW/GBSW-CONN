@@ -2,7 +2,7 @@
 
 import type { components } from "@/lib/api-schema";
 import { ApiRequestError, apiGet, apiPost, errorMessage } from "@/lib/api-client";
-import { officeLabel } from "@/lib/roles";
+import { isReviewer, officeLabel } from "@/lib/roles";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
@@ -39,7 +39,7 @@ export function ModerationConsole() {
     apiGet<CurrentUser>("/api/v1/auth/me")
       .then(async (currentUser) => {
         const reviewerCases = await apiGet<ModerationCase[]>("/api/v1/moderation/cases?size=100");
-        const reportItems = currentUser.offices.includes("STUDENT_AFFAIRS_TEACHER") ? await apiGet<ReportItem[]>("/api/v1/moderation/reports?size=100") : [];
+        const reportItems = isReviewer(currentUser) ? await apiGet<ReportItem[]>("/api/v1/moderation/reports?size=100") : [];
         if (!active) return;
         setUser(currentUser);
         setCases(reviewerCases);
@@ -65,19 +65,19 @@ export function ModerationConsole() {
   if (state === "signed-out") return <EmptyState title="로그인이 필요합니다" actions={<Button label="로그인" href="/login" variant="primary" />} headingLevel={1} />;
   if (state === "error") return <Banner status="error" title="심의 사건함을 불러오지 못했습니다" description={error ?? undefined} />;
 
-  const studentAffairs = user?.offices.includes("STUDENT_AFFAIRS_TEACHER") ?? false;
+  const reviewer = isReviewer(user);
   return (
     <VStack gap={8}>
       <VStack gap={2} maxWidth="72ch">
-        <Heading level={1} type="display-2">보호 심의</Heading>
+        <Heading level={1} type="display-2">신고 접수·보호 심의</Heading>
         <Text as="p" color="secondary">신고와 결정을 분리합니다. 공개 제한과 신원 확인은 각각 별도 사건으로 의결하며, 세 명의 고정 심의자가 같은 자료를 봅니다.</Text>
       </VStack>
 
-      {studentAffairs ? (
+      {reviewer ? (
         <VStack as="section" gap={4} aria-labelledby="reports-title">
           <VStack gap={1}>
             <Heading level={2} id="reports-title">접수된 신고</Heading>
-            <Text as="p" color="secondary">신고가 쌓이면 일반 사용자에게서 임시로 가려지지만 되돌릴 수 있는 상태입니다. 되돌릴 수 없는 공개 제한과 신원 확인은 각각 심의로 결정하세요.</Text>
+            <Text as="p" color="secondary">세 현임 보직자는 신고를 확인하고 필요한 심의를 시작할 수 있습니다. 신고가 쌓이면 일반 사용자에게서 임시로 가려지지만 되돌릴 수 있으며, 최종 공개 제한과 신원 확인은 각각 심의로 결정합니다.</Text>
           </VStack>
           {reports.length === 0 ? <EmptyState title="접수된 신고가 없습니다" isCompact /> : (
             <List hasDividers density="spacious">
@@ -93,6 +93,9 @@ export function ModerationConsole() {
                       <Heading level={3}>{report.proposalTitle ?? "제목 없는 제안"}</Heading>
                       <Text as="p" className="pre-wrap" maxLines={4}>{report.proposalContent}</Text>
                       <MetadataList columns="single"><MetadataListItem label="신고 사유">{report.reason}</MetadataListItem></MetadataList>
+                      {report.proposalPublicId ? (
+                        <Button label="원문 제안 열기" href={`/proposals/${report.proposalPublicId}`} variant="secondary" size="sm" />
+                      ) : null}
                       {report.publicId ? <CreateCaseForm key={`${report.publicId}-${(report.existingCaseTypes ?? []).join("-")}`} report={report} onCreated={(createdCase) => created(report.publicId ?? "", createdCase)} /> : null}
                     </VStack>
                   }

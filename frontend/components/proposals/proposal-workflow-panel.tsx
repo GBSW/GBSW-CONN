@@ -1,7 +1,7 @@
 "use client";
 
 import type { components } from "@/lib/api-schema";
-import { apiPost, errorMessage } from "@/lib/api-client";
+import { ApiRequestError, apiPost, errorMessage } from "@/lib/api-client";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
@@ -22,7 +22,19 @@ const decisionOptions = [
   { value: "reject", label: "반려" },
 ];
 
-export function ProposalWorkflowPanel({ publicId, workflowStatus, onUpdated }: { publicId: string; workflowStatus: string; onUpdated: () => Promise<void> }) {
+export function ProposalWorkflowPanel({
+  publicId,
+  workflowStatus,
+  onUpdated,
+  onUnavailable,
+  onSignedOut,
+}: {
+  publicId: string;
+  workflowStatus: string;
+  onUpdated: () => Promise<void>;
+  onUnavailable: () => void;
+  onSignedOut: () => void;
+}) {
   const [command, setCommand] = useState("accept");
   const [reason, setReason] = useState("");
   const [content, setContent] = useState("");
@@ -67,6 +79,14 @@ export function ProposalWorkflowPanel({ publicId, workflowStatus, onUpdated }: {
       setFollowUpPlan("");
       setNotice("상태와 공식 기록을 저장했습니다.");
     } catch (caught) {
+      if (caught instanceof ApiRequestError && caught.code === "PROPOSAL_NOT_FOUND") {
+        onUnavailable();
+        return;
+      }
+      if (caught instanceof ApiRequestError && ["AUTHENTICATION_REQUIRED", "SESSION_INVALIDATED"].includes(caught.code)) {
+        onSignedOut();
+        return;
+      }
       setError(errorMessage(caught));
     } finally {
       setPending(false);

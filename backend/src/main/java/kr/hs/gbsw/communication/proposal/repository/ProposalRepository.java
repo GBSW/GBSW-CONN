@@ -9,7 +9,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import kr.hs.gbsw.communication.proposal.domain.AuthorVisibility;
-import kr.hs.gbsw.communication.proposal.domain.EncryptedProposalIdentity;
 import kr.hs.gbsw.communication.proposal.domain.LockedProposal;
 import kr.hs.gbsw.communication.proposal.domain.ProposalFeedScope;
 import kr.hs.gbsw.communication.proposal.domain.ProposalCommentRecord;
@@ -70,20 +69,6 @@ public class ProposalRepository {
                 id.toString(), publicId.toString(), title, content,
                 authorVisibility.name(), authorDisplayName,
                 Timestamp.from(now), Timestamp.from(now));
-    }
-
-    public void insertIdentity(
-            UUID proposalId,
-            EncryptedProposalIdentity identity,
-            Instant now
-    ) {
-        jdbcTemplate.update("""
-                        INSERT INTO proposal_identities (
-                            proposal_id, encrypted_user_id, nonce, key_version, created_at
-                        ) VALUES (UUID_TO_BIN(?), ?, ?, ?, ?)
-                        """,
-                proposalId.toString(), identity.ciphertext(), identity.nonce(),
-                identity.keyVersion(), Timestamp.from(now));
     }
 
     public boolean insertSupport(UUID proposalId, UUID voterUserId, Instant now) {
@@ -157,20 +142,6 @@ public class ProposalRepository {
                         FOR UPDATE
                         """,
                 this::mapLockedProposal,
-                publicId.toString()).stream().findFirst();
-    }
-
-    public Optional<EncryptedProposalIdentity> findEncryptedIdentity(UUID publicId) {
-        return jdbcTemplate.query("""
-                        SELECT identity.encrypted_user_id, identity.nonce, identity.key_version
-                        FROM proposal_identities identity
-                        JOIN proposals proposal ON proposal.id = identity.proposal_id
-                        WHERE proposal.public_id = UUID_TO_BIN(?)
-                        """,
-                (resultSet, rowNumber) -> new EncryptedProposalIdentity(
-                        resultSet.getBytes("encrypted_user_id"),
-                        resultSet.getBytes("nonce"),
-                        resultSet.getInt("key_version")),
                 publicId.toString()).stream().findFirst();
     }
 

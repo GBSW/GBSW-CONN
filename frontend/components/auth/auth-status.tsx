@@ -3,6 +3,7 @@
 import type { components } from "@/lib/api-schema";
 import { apiGet, apiPost } from "@/lib/api-client";
 import { Button } from "@astryxdesign/core/Button";
+import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { HStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { useEffect, useState } from "react";
@@ -46,16 +47,16 @@ export function AuthStatus() {
       "STUDENT_COUNCIL_PRESIDENT",
       "STUDENT_COUNCIL_VICE_PRESIDENT",
     ].includes(office));
-    return (
-      <HStack gap={1} vAlign="center" wrap="wrap">
-        <Text type="supporting" weight="medium">{user.displayName}</Text>
-        <Button label="대시보드" href="/dashboard" variant="ghost" size="sm" />
-        {user.roles.includes("STUDENT") ? <Button label="공개 제안 작성" href="/proposals/new" variant="primary" size="sm" /> : null}
-        {reviewer ? <Button label="보호 심의" href="/moderation" variant="ghost" size="sm" /> : null}
-        {user.roles.includes("SUPER_ADMIN") ? <Button label="계정 관리" href="/admin" variant="ghost" size="sm" /> : null}
-        <Button label="로그아웃" variant="ghost" size="sm" clickAction={logout} />
-      </HStack>
-    );
+    const navigate = (href: string) => () => window.location.assign(href);
+    const items = [
+      { label: user.displayName, isDisabled: true },
+      { label: "대시보드", onClick: navigate("/dashboard") },
+      ...(user.roles.includes("STUDENT") ? [{ label: "공개 제안 작성", onClick: navigate("/proposals/new") }] : []),
+      ...(reviewer ? [{ label: "보호 심의", onClick: navigate("/moderation") }] : []),
+      ...(user.roles.includes("SUPER_ADMIN") ? [{ label: "계정 관리", onClick: navigate("/admin") }] : []),
+      { label: "로그아웃", onClick: () => void logout() },
+    ];
+    return <DropdownMenu button={{ label: "계정 메뉴", variant: "ghost", size: "sm" }} items={items} menuWidth={220} />;
   }
   return (
     <HStack gap={1} vAlign="center">
