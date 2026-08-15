@@ -107,9 +107,11 @@ export function ProposalFeed() {
     <VStack gap={6}>
       <HStack hAlign="between" vAlign="end" gap={4} wrap="wrap">
         <VStack gap={2} maxWidth="72ch">
-          <Heading level={1} type="display-2">{student ? "함께 바꿀 제안" : "검토할 정식 안건"}</Heading>
+          <Heading level={1} type="display-2">{student ? "함께 바꿀 제안" : "학생 제안 살펴보기"}</Heading>
           <Text as="p" color="secondary">
-            {student ? "최신 제안을 읽고 공감하는 의견에 동의하세요. 50명에 도달하면 정식 안건이 됩니다." : "교사 계정에는 50명 이상의 동의를 얻은 정식 안건만 표시됩니다."}
+            {student
+              ? "최신 제안을 읽고 공감하는 의견에 동의하세요. 50명에 도달하면 정식 안건이 됩니다."
+              : "동의를 모으는 중인 제안과 정식 안건을 함께 볼 수 있습니다. 익명으로 작성된 제안의 작성자는 표시되지 않습니다."}
           </Text>
         </VStack>
         {student ? <Button label="공개 제안 작성" href="/proposals/new" variant="primary" size="lg" /> : null}
@@ -120,7 +122,7 @@ export function ProposalFeed() {
           <StackItem size="fill">
             <TextInput label="검색" value={inputQuery} onChange={setInputQuery} placeholder="제목 또는 내용" hasClear width="100%" />
           </StackItem>
-          {student ? <Selector label="범위" options={scopeOptions} value={scope} onChange={(value) => { setLoading(true); setPage(0); setScope(value as ProposalScope); }} width="12rem" /> : null}
+          <Selector label="범위" options={scopeOptions} value={scope} onChange={(value) => { setLoading(true); setPage(0); setScope(value as ProposalScope); }} width="12rem" />
           <Selector label="정렬" options={sortOptions} value={sort} onChange={(value) => { setLoading(true); setPage(0); setSort(value as ProposalSort); }} width="12rem" />
           <Button label="검색" type="submit" variant="secondary" isLoading={loading} />
         </HStack>

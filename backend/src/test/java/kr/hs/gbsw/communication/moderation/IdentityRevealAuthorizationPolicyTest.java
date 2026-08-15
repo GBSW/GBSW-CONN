@@ -14,17 +14,21 @@ import org.springframework.security.access.AccessDeniedException;
 class IdentityRevealAuthorizationPolicyTest {
 
     @Test
-    void rejectsSuperAdminAndCurrentStudentOfficer() {
+    void rejectsSuperAdminAndUnsupportedRole() {
         assertThrows(AccessDeniedException.class, () -> IdentityRevealAuthorizationPolicy.requireAllowed(
                 principal(List.of("ROLE_TEACHER", "ROLE_SUPER_ADMIN"))));
         assertThrows(AccessDeniedException.class, () -> IdentityRevealAuthorizationPolicy.requireAllowed(
-                principal(List.of("ROLE_TEACHER", "OFFICE_STUDENT_COUNCIL_PRESIDENT"))));
+                principal(List.of("ROLE_USER"))));
     }
 
     @Test
-    void acceptsTeacherWithoutProhibitedAuthority() {
+    void acceptsTeacherAndStudentOfficerRoles() {
         assertDoesNotThrow(() -> IdentityRevealAuthorizationPolicy.requireAllowed(
                 principal(List.of("ROLE_TEACHER"))));
+        assertDoesNotThrow(() -> IdentityRevealAuthorizationPolicy.requireAllowed(
+                principal(List.of("ROLE_STUDENT", "OFFICE_STUDENT_COUNCIL_PRESIDENT"))));
+        assertDoesNotThrow(() -> IdentityRevealAuthorizationPolicy.requireAllowed(
+                principal(List.of("ROLE_STUDENT", "OFFICE_STUDENT_COUNCIL_VICE_PRESIDENT"))));
     }
 
     private AuthPrincipal principal(List<String> authorities) {

@@ -2,7 +2,6 @@
 
 import type { components } from "@/lib/api-schema";
 import { ApiRequestError, apiGet, apiPost, errorMessage } from "@/lib/api-client";
-import { officeLabel } from "@/lib/roles";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
@@ -25,6 +24,9 @@ type IdentityReveal = components["schemas"]["IdentityRevealResponse"];
 
 const caseTypeLabels: Record<string, string> = { CONTENT_VISIBILITY: "공개 제한 심의", IDENTITY_REVEAL: "신원 확인 심의" };
 const statusLabels: Record<string, string> = { PENDING: "심의 중", APPROVED: "승인", REJECTED: "반려" };
+const officeLabels: Record<string, string> = {
+  STUDENT_AFFAIRS_TEACHER: "학생부장교사", STUDENT_COUNCIL_PRESIDENT: "학생회장", STUDENT_COUNCIL_VICE_PRESIDENT: "학생부회장",
+};
 const decisionLabels: Record<string, string> = { APPROVE: "승인", REJECT: "반대" };
 const dateTimeFormatter = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", dateStyle: "medium", timeStyle: "short" });
 const statusVariants: Record<string, "accent" | "success" | "error"> = { PENDING: "accent", APPROVED: "success", REJECTED: "error" };
@@ -55,7 +57,9 @@ export function ModerationCaseDetail({ publicId }: { publicId: string }) {
   if (state === "error" || !moderationCase) return <Banner status="error" title="사건을 불러오지 못했습니다" description={error ?? undefined} />;
 
   const pendingVote = moderationCase.caseStatus === "PENDING" && !moderationCase.viewerVoted;
-  const canReveal = moderationCase.caseType === "IDENTITY_REVEAL" && moderationCase.caseStatus === "APPROVED" && moderationCase.viewerOffice === "STUDENT_AFFAIRS_TEACHER";
+  // 전원 승인된 신원 확인 사건은 고정 심의자 세 명 모두 열람할 수 있다.
+  // 열람 가능 기간이 지났는지는 서버가 판정한다.
+  const canReveal = moderationCase.caseType === "IDENTITY_REVEAL" && moderationCase.caseStatus === "APPROVED";
   const status = moderationCase.caseStatus ?? "";
 
   return (
@@ -67,7 +71,7 @@ export function ModerationCaseDetail({ publicId }: { publicId: string }) {
           <Text type="label">{caseTypeLabels[moderationCase.caseType ?? ""] ?? moderationCase.caseType} · {statusLabels[status] ?? status}</Text>
         </HStack>
         <Heading level={1} type="display-2">{moderationCase.proposalTitle ?? "제목 없는 제안"}</Heading>
-        <Text as="p" color="secondary">{officeLabel(moderationCase.viewerOffice ?? "")} 자격으로 심의 중</Text>
+        <Text as="p" color="secondary">{officeLabels[moderationCase.viewerOffice ?? ""] ?? moderationCase.viewerOffice} 자격으로 심의 중</Text>
       </VStack>
 
       <Section variant="muted" padding={6} aria-labelledby="evidence-title">
@@ -93,7 +97,7 @@ export function ModerationCaseDetail({ publicId }: { publicId: string }) {
             {(moderationCase.votes ?? []).map((vote, index) => (
               <ListItem
                 key={`${vote.office}-${vote.createdAt}-${index}`}
-                label={`${officeLabel(vote.office ?? "")} · ${decisionLabels[vote.decision ?? ""] ?? vote.decision}`}
+                label={`${officeLabels[vote.office ?? ""] ?? vote.office} · ${decisionLabels[vote.decision ?? ""] ?? vote.decision}`}
                 description={`${vote.reason} · ${formatDateTime(vote.createdAt)}`}
               />
             ))}
@@ -102,7 +106,17 @@ export function ModerationCaseDetail({ publicId }: { publicId: string }) {
       </VStack>
 
       {pendingVote ? <VoteForm publicId={publicId} onVoted={load} /> : moderationCase.viewerVoted ? <Banner status="success" title="이 사건에 대한 의결을 완료했습니다" /> : null}
-      {canReveal ? moderationCase.identityRevealed ? <Banner status="info" title="신원 확인을 이미 완료했습니다" description="일회성 결과는 다시 표시되지 않습니다." /> : <IdentityRevealForm publicId={publicId} onRevealed={() => setModerationCase((current) => current ? { ...current, identityRevealed: true } : current)} /> : null}
+      {canReveal ? (
+        <VStack gap={4}>
+          {moderationCase.identityRevealed
+            ? <Banner status="info" title="이 사건의 신원은 이미 확인된 적이 있습니다" description="확인할 때마다 재인증과 사유 입력이 필요하며 기록이 남습니다." />
+            : null}
+          <IdentityRevealForm
+            publicId={publicId}
+            onRevealed={() => setModerationCase((current) => current ? { ...current, identityRevealed: true } : current)}
+          />
+        </VStack>
+      ) : null}
     </VStack>
   );
 }
@@ -151,14 +165,18 @@ function IdentityRevealForm({ publicId, onRevealed }: { publicId: string; onReve
   if (identity) return (
     <Card padding={6} variant="red" elevation="med">
       <VStack gap={4}>
-        <Heading level={2}>확인된 작성자 · 일회성 표시</Heading>
+        <Heading level={2}>확인된 작성자 · 화면에만 표시</Heading>
         <MetadataList columns="single">
           <MetadataListItem label="로그인 ID">{identity.loginId}</MetadataListItem>
           <MetadataListItem label="이름">{identity.displayName}</MetadataListItem>
           <MetadataListItem label="확인 시각">{formatDateTime(identity.revealedAt)}</MetadataListItem>
         </MetadataList>
-        <Text as="p">이 정보는 현재 화면 상태에만 있으며, 닫은 뒤 다시 조회할 수 없습니다.</Text>
-        <Button label="확인 결과 닫기" variant="destructive" onClick={onRevealed} />
+        <Text as="p">이 정보는 현재 화면 상태에만 있습니다. 닫으면 사라지며 다시 보려면 재인증과 사유 입력을 거쳐야 합니다.</Text>
+        <Button
+          label="확인 결과 닫기"
+          variant="destructive"
+          onClick={() => { setIdentity(null); onRevealed(); }}
+        />
       </VStack>
     </Card>
   );
@@ -166,13 +184,13 @@ function IdentityRevealForm({ publicId, onRevealed }: { publicId: string; onReve
   return (
     <Section variant="muted" padding={6} aria-labelledby="identity-reveal-title">
       <VStack gap={4}>
-        <VStack gap={1}><Heading level={2} id="identity-reveal-title">작성자 신원 일회 확인</Heading><Text as="p" color="secondary">학생부장교사만 승인된 사건에서 사용할 수 있습니다. 비밀번호로 다시 인증한 뒤 결과가 한 번 표시됩니다.</Text></VStack>
+        <VStack gap={1}><Heading level={2} id="identity-reveal-title">작성자 신원 확인</Heading><Text as="p" color="secondary">전원 승인된 사건에서 고정 심의자 세 명이 승인 시점부터 24시간 동안 사용할 수 있습니다. 확인할 때마다 비밀번호 재인증과 사유 입력이 필요하며 기록이 남습니다.</Text></VStack>
         <form onSubmit={(event) => void reveal(event)}>
           <VStack gap={4}>
             <TextInput label="현재 비밀번호" type="password" value={password} onChange={setPassword} isRequired width="100%" />
             <TextArea label="확인 사유" value={reason} onChange={setReason} maxLength={2000} rows={5} isRequired width="100%" />
             {error ? <Banner status="error" title="작성자 신원을 확인할 수 없습니다" description={error} /> : null}
-            <Button label="재인증하고 한 번 확인" type="submit" variant="destructive" isLoading={pending} isDisabled={pending || !password || !reason.trim()} />
+            <Button label="재인증하고 확인" type="submit" variant="destructive" isLoading={pending} isDisabled={pending || !password || !reason.trim()} />
           </VStack>
         </form>
       </VStack>

@@ -77,7 +77,7 @@ export function ModerationConsole() {
         <VStack as="section" gap={4} aria-labelledby="reports-title">
           <VStack gap={1}>
             <Heading level={2} id="reports-title">접수된 신고</Heading>
-            <Text as="p" color="secondary">세 현임 보직자는 신고를 확인하고 필요한 심의를 시작할 수 있습니다. 신고만으로 제안 상태는 바뀌지 않습니다.</Text>
+            <Text as="p" color="secondary">세 현임 보직자는 신고를 확인하고 필요한 심의를 시작할 수 있습니다. 신고가 쌓이면 일반 사용자에게서 임시로 가려지지만 되돌릴 수 있으며, 최종 공개 제한과 신원 확인은 각각 심의로 결정합니다.</Text>
           </VStack>
           {reports.length === 0 ? <EmptyState title="접수된 신고가 없습니다" isCompact /> : (
             <List hasDividers density="spacious">

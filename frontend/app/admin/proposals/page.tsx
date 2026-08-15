@@ -24,15 +24,15 @@ export default function AdminProposalAssignmentsPage() {
             <VStack gap={1}>
               <Heading level={2}>신고된 제안 확인</Heading>
               <Text as="p" color="secondary">
-                신고 접수와 보호 심의는 담당 지정 업무와 분리되어 있습니다. 신고 사유와 제안 원문은 현임 학생부장교사 계정에서만 확인할 수 있습니다.
+                신고 접수와 보호 심의는 담당 지정 업무와 분리되어 있습니다. 신고 사유와 제안 원문은 현임 학생부장교사·학생회장·학생부회장 계정에서 확인할 수 있습니다.
               </Text>
               <Text as="p" type="supporting" color="secondary">
-                교사 계정을 준비한 뒤 학생부장교사 보직을 지정하고, 해당 계정으로 로그인해 신고 접수함을 여세요.
+                세 심의 보직을 모두 지정한 뒤 해당 계정 중 하나로 로그인해 신고 접수함을 여세요.
               </Text>
             </VStack>
             <HStack gap={2} wrap="wrap">
               <Button label="교사 계정 만들기" href="/admin/accounts/new" variant="secondary" />
-              <Button label="학생부장교사 보직 지정" href="/admin/offices" variant="secondary" />
+              <Button label="세 심의 보직 지정" href="/admin/offices" variant="secondary" />
               <Button label="신고 접수함 열기" href="/moderation#reports-title" variant="primary" />
             </HStack>
           </VStack>
