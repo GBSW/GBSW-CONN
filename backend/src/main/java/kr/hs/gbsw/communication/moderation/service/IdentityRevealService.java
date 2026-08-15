@@ -9,6 +9,7 @@ import kr.hs.gbsw.communication.auth.domain.ThrottleOperation;
 import kr.hs.gbsw.communication.auth.exception.AuthenticationThrottledException;
 import kr.hs.gbsw.communication.auth.service.AuthenticationThrottleService;
 import kr.hs.gbsw.communication.auth.service.RecentAuthenticationGuard;
+import kr.hs.gbsw.communication.moderation.config.ModerationProperties;
 import kr.hs.gbsw.communication.moderation.domain.IdentityRevealResult;
 import kr.hs.gbsw.communication.moderation.domain.LockedModerationCase;
 import kr.hs.gbsw.communication.moderation.domain.ModerationCaseStatus;
@@ -18,9 +19,7 @@ import kr.hs.gbsw.communication.moderation.domain.RevealedIdentity;
 import kr.hs.gbsw.communication.moderation.exception.IdentityRevealUnavailableException;
 import kr.hs.gbsw.communication.moderation.exception.ModerationNotFoundException;
 import kr.hs.gbsw.communication.moderation.repository.ModerationRepository;
-import kr.hs.gbsw.communication.office.domain.OfficeType;
 import kr.hs.gbsw.communication.proposal.service.ProposalIdentityCipher;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +31,7 @@ public class IdentityRevealService {
     private final AuthenticationThrottleService throttleService;
     private final ProposalIdentityCipher identityCipher;
     private final AuditLogRepository auditLogRepository;
+    private final ModerationProperties properties;
     private final Clock clock;
 
     public IdentityRevealService(
@@ -40,6 +40,7 @@ public class IdentityRevealService {
             AuthenticationThrottleService throttleService,
             ProposalIdentityCipher identityCipher,
             AuditLogRepository auditLogRepository,
+            ModerationProperties properties,
             Clock clock
     ) {
         this.repository = repository;
@@ -47,6 +48,7 @@ public class IdentityRevealService {
         this.throttleService = throttleService;
         this.identityCipher = identityCipher;
         this.auditLogRepository = auditLogRepository;
+        this.properties = properties;
         this.clock = clock;
     }
 
@@ -62,9 +64,9 @@ public class IdentityRevealService {
             String remoteAddress,
             String traceId
     ) {
-        if (!actor.authorities().contains("ROLE_TEACHER")) {
-            throw new AccessDeniedException("Identity reveal requires a teacher role");
-        }
+        // 열람 자격은 역할이 아니라 사건 생성 시점에 고정된 심의자인지로 판단한다.
+        // 학생회장과 부회장은 학생 역할이므로 교사 역할을 요구하면 명세를 만족할 수 없다.
+        // 실제 심의자 확인은 아래 lockCaseForReviewer가 담당한다.
         recentAuthenticationGuard.requireRecent(actor);
         Instant now = clock.instant();
         try {
@@ -73,13 +75,16 @@ public class IdentityRevealService {
             LockedModerationCase moderationCase = repository.lockCaseForReviewer(casePublicId, actor.userId())
                     .orElseThrow(ModerationNotFoundException::new);
             if (moderationCase.type() != ModerationCaseType.IDENTITY_REVEAL
-                    || moderationCase.status() != ModerationCaseStatus.APPROVED
-                    || moderationCase.viewerOffice() != OfficeType.STUDENT_AFFAIRS_TEACHER) {
+                    || moderationCase.status() != ModerationCaseStatus.APPROVED) {
                 throw new IdentityRevealUnavailableException(
-                        "승인된 신원 확인 사건의 학생부장교사만 신원을 확인할 수 있습니다.");
+                        "전원 승인된 신원 확인 사건의 고정 심의자만 신원을 확인할 수 있습니다.");
             }
-            if (repository.hasIdentityReveal(moderationCase.id())) {
-                throw new IdentityRevealUnavailableException("이 사건의 신원은 이미 한 번 확인되었습니다.");
+            // 승인 시점부터 정해진 기간 동안만 열람할 수 있다. 클라이언트 시간은 신뢰하지 않는다.
+            Instant decidedAt = moderationCase.decidedAt();
+            if (decidedAt == null
+                    || !now.isBefore(decidedAt.plus(properties.identityRevealWindow()))) {
+                throw new IdentityRevealUnavailableException(
+                        "신원 확인 열람 기간이 지났습니다. 필요하면 새 사건으로 다시 심의해 주세요.");
             }
 
             ProtectedProposalIdentity protectedIdentity = repository.findProtectedIdentity(moderationCase.id())

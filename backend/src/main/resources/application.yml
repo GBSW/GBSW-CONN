@@ -73,6 +73,8 @@ app:
       throttle-fingerprint: ${THROTTLE_FINGERPRINT_SECRET}
   proposal:
     support-threshold: ${PROPOSAL_SUPPORT_THRESHOLD:50}
+  moderation:
+    identity-reveal-window: ${IDENTITY_REVEAL_WINDOW:24h}
   identity-vault:
     key-base64: ${PROPOSAL_IDENTITY_KEY_BASE64}
     key-version: ${PROPOSAL_IDENTITY_KEY_VERSION:1}
