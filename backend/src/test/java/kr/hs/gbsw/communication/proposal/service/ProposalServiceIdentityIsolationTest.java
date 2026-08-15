@@ -54,7 +54,7 @@ class ProposalServiceIdentityIsolationTest {
                 repository,
                 identityVaultService,
                 ownershipTagService,
-                new ProposalProperties(50),
+                new ProposalProperties(50, 3),
                 workflowRepository,
                 auditLogRepository,
                 Clock.fixed(NOW, ZoneOffset.UTC));
@@ -78,7 +78,7 @@ class ProposalServiceIdentityIsolationTest {
                 null,
                 null,
                 NOW);
-        when(repository.findDetail(publicId, userId, true, NOW)).thenReturn(Optional.of(proposal));
+        when(repository.findDetail(publicId, userId, NOW)).thenReturn(Optional.of(proposal));
         when(repository.findStatusHistory(publicId)).thenReturn(List.of());
         when(workflowRepository.findOfficialResponses(publicId)).thenReturn(List.of());
         when(ownershipTagService.matches(publicId, userId)).thenReturn(false);
