@@ -19,6 +19,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.ByteBuffer;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -154,7 +155,7 @@ class ApplicationIntegrationTest {
 
     @Test
     void appliesFlywayAndCreatesJdbcSessionTablesOnEmptyMySql() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("7");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("8");
 
         Integer sessionTableCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'SPRING_SESSION'",
@@ -1223,10 +1224,10 @@ class ApplicationIntegrationTest {
     }
 
     @Test
-    void reportsUseFixedThreeReviewerCasesAndRevealIdentityOnlyOnce() throws Exception {
+    void reportsUseFixedThreeReviewerCasesAndAllowRevealByThreeReviewersWithinWindow() throws Exception {
         SeedAccount author = createActiveAccount(
                 "moderation.author", "익명 제안 작성자", "STUDENT", "author secure passphrase");
-        createActiveAccount(
+        SeedAccount moderationReporter = createActiveAccount(
                 "moderation.reporter", "신고 학생", "STUDENT", "reporter secure passphrase");
         SeedAccount studentAffairs = createActiveAccount(
                 "moderation.teacher", "학생부장", "TEACHER", "teacher secure passphrase");
@@ -1234,7 +1235,7 @@ class ApplicationIntegrationTest {
                 "moderation.president", "학생회장", "STUDENT", "president secure passphrase");
         SeedAccount vicePresident = createActiveAccount(
                 "moderation.vice", "학생부회장", "STUDENT", "vice secure passphrase");
-        createActiveAccount(
+        SeedAccount moderationAdmin = createActiveAccount(
                 "moderation.admin", "심의 불가 관리자", "SUPER_ADMIN", "admin secure passphrase");
         assignOfficeForTest(studentAffairs, "STUDENT_AFFAIRS_TEACHER");
         assignOfficeForTest(president, "STUDENT_COUNCIL_PRESIDENT");
@@ -1345,31 +1346,36 @@ class ApplicationIntegrationTest {
         vote(teacherSession, identityCaseId, "approve", "신원 확인에 동의합니다.", "PENDING");
         vote(presidentSession, identityCaseId, "approve", "학생회장 승인입니다.", "PENDING");
         vote(viceSession, identityCaseId, "approve", "학생부회장 승인입니다.", "APPROVED");
-        mockMvc.perform(post("/api/v1/identity-reveal-cases/{publicId}/reveal", identityCaseId)
-                        .cookie(presidentSession).with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"reason\":\"학생회장 확인 시도\"}"))
-                .andExpect(status().isForbidden());
+        // 슈퍼 어드민은 학생·교사 역할이 없어 인가 단계에서 막힌다.
         mockMvc.perform(post("/api/v1/identity-reveal-cases/{publicId}/reveal", identityCaseId)
                         .cookie(adminSession).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"reason\":\"관리자 확인 시도\"}"))
                 .andExpect(status().isForbidden());
+        // 신고자는 학생이지만 이 사건의 고정 심의자가 아니므로 사건 자체를 찾을 수 없다.
+        mockMvc.perform(post("/api/v1/identity-reveal-cases/{publicId}/reveal", identityCaseId)
+                        .cookie(reporterSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"심의자가 아닌 학생의 시도\"}"))
+                .andExpect(status().isNotFound());
 
+        // 고정 심의자 세 명 모두 열람할 수 있다. 학생회장과 부회장은 학생 역할이다.
+        for (Cookie reviewerSession : List.of(teacherSession, presidentSession, viceSession)) {
+            mockMvc.perform(post("/api/v1/identity-reveal-cases/{publicId}/reveal", identityCaseId)
+                            .cookie(reviewerSession).with(csrf())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"reason\":\"승인 결과에 따른 신원 확인\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(jsonPath("$.loginId").value(author.loginId()))
+                    .andExpect(jsonPath("$.displayName").value("익명 제안 작성자"));
+        }
+        // 같은 사람이 기간 안에 다시 확인할 수 있고 그때마다 기록이 남는다.
         mockMvc.perform(post("/api/v1/identity-reveal-cases/{publicId}/reveal", identityCaseId)
                         .cookie(teacherSession).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"reason\":\"승인 결과에 따른 일회 확인\"}"))
-                .andExpect(status().isOk())
-                .andExpect(header().string("Cache-Control", "no-store"))
-                .andExpect(jsonPath("$.loginId").value(author.loginId()))
-                .andExpect(jsonPath("$.displayName").value("익명 제안 작성자"));
-        mockMvc.perform(post("/api/v1/identity-reveal-cases/{publicId}/reveal", identityCaseId)
-                        .cookie(teacherSession).with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"reason\":\"두 번째 확인 시도\"}"))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("IDENTITY_REVEAL_UNAVAILABLE"));
+                        .content("{\"reason\":\"기간 내 재확인\"}"))
+                .andExpect(status().isOk());
 
         MvcResult caseAfterReveal = mockMvc.perform(
                         get("/api/v1/moderation/cases/{publicId}", identityCaseId)
@@ -1380,18 +1386,47 @@ class ApplicationIntegrationTest {
         assertThat(caseAfterReveal.getResponse().getContentAsString())
                 .doesNotContain(author.loginId(), author.publicId().toString(), "익명 제안 작성자");
         assertThat(jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM identity_reveal_records", Integer.class)).isEqualTo(1);
+                "SELECT COUNT(*) FROM identity_reveal_records", Integer.class)).isEqualTo(4);
         assertThat(jdbcTemplate.queryForObject("""
-                        SELECT COUNT(*) FROM security_throttle_states
-                        WHERE throttle_scope IN ('IDENTITY_REVEAL_ACCOUNT', 'IDENTITY_REVEAL_IP')
-                          AND failure_count = 1
-                        """, Integer.class)).isEqualTo(2);
+                        SELECT COUNT(DISTINCT revealed_by_user_id) FROM identity_reveal_records
+                        """, Integer.class)).isEqualTo(3);
+        // 열람 기록에 평문 신원을 남기지 않는다.
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT reason FROM identity_reveal_records", String.class))
+                .noneMatch(reason -> reason.contains(author.loginId()));
         assertThat(jdbcTemplate.queryForObject("""
                         SELECT COUNT(*) FROM audit_logs
                         WHERE event_type = 'PROPOSAL_IDENTITY_REVEALED'
-                          AND actor_user_id = UUID_TO_BIN(?)
                           AND details_json IS NULL
-                        """, Integer.class, studentAffairs.id().toString())).isEqualTo(1);
+                        """, Integer.class)).isEqualTo(4);
+        // 심의자가 아닌 계정의 시도는 열람 기록을 남기지 않는다.
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM identity_reveal_records
+                        WHERE revealed_by_user_id IN (UUID_TO_BIN(?), UUID_TO_BIN(?))
+                        """, Integer.class, moderationAdmin.id().toString(), moderationReporter.id().toString()))
+                .isZero();
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM audit_logs
+                        WHERE event_type = 'PROPOSAL_IDENTITY_REVEAL_FAILED'
+                          AND actor_user_id = UUID_TO_BIN(?)
+                        """, Integer.class, moderationReporter.id().toString())).isEqualTo(1);
+
+        // 승인 시점이 열람 기간보다 오래되면 세 사람 모두 더는 확인할 수 없다.
+        jdbcTemplate.update("""
+                        UPDATE moderation_cases SET decided_at = ?
+                        WHERE public_id = UUID_TO_BIN(?)
+                        """,
+                Timestamp.from(Instant.now().minus(Duration.ofHours(25))), identityCaseId.toString());
+        for (Cookie reviewerSession : List.of(teacherSession, presidentSession, viceSession)) {
+            mockMvc.perform(post("/api/v1/identity-reveal-cases/{publicId}/reveal", identityCaseId)
+                            .cookie(reviewerSession).with(csrf())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"reason\":\"만료 후 확인 시도\"}"))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value("IDENTITY_REVEAL_UNAVAILABLE"));
+        }
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM identity_reveal_records", Integer.class)).isEqualTo(4);
     }
 
     @Test
