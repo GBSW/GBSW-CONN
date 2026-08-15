@@ -8,6 +8,7 @@ import { List, ListItem } from "@astryxdesign/core/List";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
+import { TeacherProposalLists } from "@/components/dashboard/teacher-proposal-lists";
 import { useCurrentUser } from "@/lib/current-user";
 import { isReviewer, isStudent, isSuperAdmin, isTeacher } from "@/lib/roles";
 import { useRouter } from "next/navigation";
@@ -54,11 +55,13 @@ export function DashboardHome() {
         <Heading level={2} id="dashboard-actions-title">내 업무</Heading>
         <List hasDividers density="spacious">
           {student ? <ListItem href="/proposals" label="학생 제안 살펴보기" description="공개 제안에 동의하고 진행 상태와 학교의 답변을 확인합니다." /> : null}
-          {teacher ? <ListItem href="/proposals" label="정식 안건 검토하기" description="50명 이상의 동의를 받은 정식 안건과 공식 기록을 확인합니다." /> : null}
+          {teacher ? <ListItem href="/proposals" label="제안 전체 목록" description="검색과 정렬로 학생 제안과 정식 안건을 함께 살펴봅니다." /> : null}
           {reviewer ? <ListItem href="/moderation" label="보호 심의" description="지정된 심의 사건과 아직 필요한 의결을 확인합니다." /> : null}
           {admin ? <ListItem href="/admin" label="관리자 업무" description="계정, 보직, 정식 안건 담당 지정을 각각 관리합니다." /> : null}
         </List>
       </VStack>
+
+      {teacher ? <TeacherProposalLists /> : null}
     </VStack>
   );
 }

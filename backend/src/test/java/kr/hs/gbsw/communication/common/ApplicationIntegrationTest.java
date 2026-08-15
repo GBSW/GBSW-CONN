@@ -499,7 +499,7 @@ class ApplicationIntegrationTest {
     }
 
     @Test
-    void anonymousAndNamedProposalsProtectIdentityAndHideGatheringContentFromTeachers() throws Exception {
+    void anonymousAndNamedProposalsProtectIdentityWhileTeachersSeeGatheringProposals() throws Exception {
         SeedAccount anonymousStudent = createActiveAccount(
                 "anonymous.student", "익명 학생", "STUDENT", "student secure passphrase");
         createActiveAccount("proposal.teacher", "제안 교사", "TEACHER", "teacher secure passphrase");
@@ -531,12 +531,23 @@ class ApplicationIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").value("소등 시간을 논의해 주세요. <script>alert(1)</script>"))
                 .andExpect(jsonPath("$.authorDisplayName").doesNotExist());
+        // 교사도 동의 모집 중인 제안을 본다. 다만 익명 작성자의 신원은 드러나지 않는다.
         mockMvc.perform(get("/api/v1/proposals/{publicId}", proposalPublicId).cookie(teacherSession))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("PROPOSAL_NOT_FOUND"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.workflowStatus").value("GATHERING_SUPPORT"))
+                .andExpect(jsonPath("$.authorVisibility").value("ANONYMOUS"))
+                .andExpect(jsonPath("$.authorDisplayName").doesNotExist())
+                .andExpect(jsonPath("$.viewerCanEdit").value(false))
+                .andExpect(jsonPath("$.viewerCanManage").value(false));
         mockMvc.perform(get("/api/v1/proposals").cookie(teacherSession))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalElements").value(0));
+                .andExpect(jsonPath("$.totalElements").value(1));
+        mockMvc.perform(get("/api/v1/proposals?scope=GATHERING_SUPPORT&sort=MOST_SUPPORTED")
+                        .cookie(teacherSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.items[0].authorVisibility").value("ANONYMOUS"))
+                .andExpect(jsonPath("$.items[0].authorDisplayName").doesNotExist());
 
         byte[] encryptedIdentity = jdbcTemplate.queryForObject("""
                         SELECT identity.encrypted_user_id
@@ -832,9 +843,12 @@ class ApplicationIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].content").value("이 제안에 동의합니다."))
                 .andExpect(jsonPath("$[0].viewerCanDelete").value(false));
+        // 교사는 동의 모집 중인 제안과 그 댓글을 읽을 수 있지만 댓글을 달 수는 없다.
         mockMvc.perform(get("/api/v1/proposals/{publicId}/comments", proposalPublicId)
                         .cookie(teacherSession))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].content").value("이 제안에 동의합니다."))
+                .andExpect(jsonPath("$[0].viewerCanDelete").value(false));
         mockMvc.perform(post("/api/v1/proposals/{publicId}/comments", proposalPublicId)
                         .cookie(teacherSession).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
