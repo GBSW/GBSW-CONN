@@ -87,7 +87,7 @@ public class ProposalWorkflowRepository {
                                visibility_status
                         FROM proposals
                         WHERE public_id = UUID_TO_BIN(?)
-                          AND visibility_status = 'VISIBLE'
+                          AND visibility_status IN ('VISIBLE', 'RESTRICTED')
                           AND withdrawn_at IS NULL
                         FOR UPDATE
                         """,

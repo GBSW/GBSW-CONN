@@ -1602,9 +1602,16 @@ class ApplicationIntegrationTest {
                         WHERE public_id = UUID_TO_BIN(?)
                         """,
                 Timestamp.from(Instant.now().minus(Duration.ofHours(25))), identityCaseId.toString());
-        for (Cookie reviewerSession : List.of(teacherSession, presidentSession, viceSession)) {
+        List<Cookie> expiredReviewerSessions = List.of(teacherSession, presidentSession, viceSession);
+        for (int index = 0; index < expiredReviewerSessions.size(); index++) {
+            Cookie reviewerSession = expiredReviewerSessions.get(index);
+            String remoteAddress = "192.0.2." + (index + 1);
             mockMvc.perform(post("/api/v1/identity-reveal-cases/{publicId}/reveal", identityCaseId)
                             .cookie(reviewerSession).with(csrf())
+                            .with(request -> {
+                                request.setRemoteAddr(remoteAddress);
+                                return request;
+                            })
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"reason\":\"만료 후 확인 시도\"}"))
                     .andExpect(status().isConflict())
