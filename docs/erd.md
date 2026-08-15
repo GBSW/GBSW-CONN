@@ -58,7 +58,7 @@ erDiagram
 | `proposal_notifications` | 정식 안건 교사 알림 아웃박스 | 제안+알림 유형 고유, 승격 트랜잭션에 포함 |
 | `proposal_teacher_assignments` | 내부 담당 교사 지정·변경 이력 | 생성 열 고유 제약으로 제안별 현재 담당 최대 1명, 이전 행 보존 |
 | `proposal_official_responses` | 공개 공식 답변과 실행 업데이트 | 허용 결과 상태, 내부 응답자 FK, 일반 DTO에서 응답자 제외 |
-| `content_reports` | 사용자의 제안 신고와 사유 | 제안+신고자 고유, 신고만으로 상태 변경 없음 |
+| `content_reports` | 사용자의 제안 신고와 사유 | 제안+신고자 고유. 임계값 도달 시 `visibility_status`를 `RESTRICTED`로 바꾸며 원문은 그대로 둔다 |
 | `moderation_cases` | 공개 제한 또는 신원 확인 사건 | 사건 유형 allowlist, 대상과 사유 필수 |
 | `moderation_reviewer_snapshots` | 사건 당시 3인 심의자 | 사건+보직 고유, 정확히 3명은 생성 서비스에서 검증 |
 | `moderation_votes` | 심의자 1회 승인/거부 | 심의자 스냅샷당 최대 1표 |

@@ -876,6 +876,93 @@ class ApplicationIntegrationTest {
     }
 
     @Test
+    void reportsHideProposalOnlyAtThresholdAndExactlyOnceUnderConcurrency() throws Exception {
+        SeedAccount author = insertUser("hide.author", "가림 작성자", "ACTIVE", "STUDENT");
+        UUID publicId = proposalService.create(
+                studentPrincipal(author),
+                "신고 임계값 검증 제안",
+                "신고가 쌓이면 일반 사용자에게 임시로 가려져야 합니다.",
+                AuthorVisibility.ANONYMOUS,
+                "report-threshold-create").publicId();
+
+        // 임계값 직전까지는 공개 상태가 그대로여야 한다.
+        for (int index = 0; index < 3; index++) {
+            SeedAccount reporter = insertUser(
+                    "hide.reporter." + index, "가림 신고자 " + index, "ACTIVE", "STUDENT");
+            contentReportService.report(
+                    studentPrincipal(reporter), publicId, "신고 사유 " + index, "report-threshold-trace");
+        }
+        assertThat(visibilityStatusOf(publicId)).isEqualTo("VISIBLE");
+
+        // 같은 사용자가 다시 신고해도 1건으로만 계산되어 임계값을 앞당기지 않는다.
+        SeedAccount repeatReporter = insertUser("hide.reporter.repeat", "중복 신고자", "ACTIVE", "STUDENT");
+        contentReportService.report(
+                studentPrincipal(repeatReporter), publicId, "첫 신고", "report-threshold-trace");
+        contentReportService.report(
+                studentPrincipal(repeatReporter), publicId, "같은 사람의 두 번째 신고", "report-threshold-trace");
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM content_reports report
+                        JOIN proposals proposal ON proposal.id = report.proposal_id
+                        WHERE proposal.public_id = UUID_TO_BIN(?)
+                        """, Integer.class, publicId.toString())).isEqualTo(4);
+        assertThat(visibilityStatusOf(publicId)).isEqualTo("VISIBLE");
+
+        // 다섯 번째와 여섯 번째 신고를 동시에 보내 가림이 정확히 한 번만 적용되는지 본다.
+        SeedAccount fifth = insertUser("hide.reporter.fifth", "다섯째 신고자", "ACTIVE", "STUDENT");
+        SeedAccount sixth = insertUser("hide.reporter.sixth", "여섯째 신고자", "ACTIVE", "STUDENT");
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            Future<?> first = executor.submit(() -> {
+                ready.countDown();
+                start.await();
+                return contentReportService.report(
+                        studentPrincipal(fifth), publicId, "동시 신고 A", "report-threshold-concurrent-a");
+            });
+            Future<?> second = executor.submit(() -> {
+                ready.countDown();
+                start.await();
+                return contentReportService.report(
+                        studentPrincipal(sixth), publicId, "동시 신고 B", "report-threshold-concurrent-b");
+            });
+            ready.await();
+            start.countDown();
+            first.get();
+            second.get();
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertThat(visibilityStatusOf(publicId)).isEqualTo("RESTRICTED");
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM audit_logs
+                        WHERE event_type = 'PROPOSAL_RESTRICTED_BY_REPORTS'
+                          AND target_public_id = UUID_TO_BIN(?)
+                        """, Integer.class, publicId.toString())).isEqualTo(1);
+
+        // 가려진 제안은 일반 사용자의 목록과 상세에서 사라진다.
+        SeedAccount reader = createActiveAccount(
+                "hide.reader", "가림 확인 학생", "STUDENT", "reader secure passphrase");
+        Cookie readerSession = requireSessionCookie(login("hide.reader", "reader secure passphrase"));
+        mockMvc.perform(get("/api/v1/proposals/{publicId}", publicId).cookie(readerSession))
+                .andExpect(status().isNotFound());
+        MvcResult feed = mockMvc.perform(get("/api/v1/proposals").cookie(readerSession))
+                .andExpect(status().isOk())
+                .andReturn();
+        assertThat(feed.getResponse().getContentAsString()).doesNotContain("신고 임계값 검증 제안");
+        // 신고 수는 일반 사용자에게 어떤 형태로도 노출되지 않는다.
+        assertThat(feed.getResponse().getContentAsString()).doesNotContain("reportCount");
+        assertThat(reader.publicId()).isNotNull();
+    }
+
+    private String visibilityStatusOf(UUID proposalPublicId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT visibility_status FROM proposals WHERE public_id = UUID_TO_BIN(?)",
+                String.class, proposalPublicId.toString());
+    }
+
+    @Test
     void concurrentThresholdSupportsFormalizeExactlyOnceAndOpenTeacherAccess() throws Exception {
         SeedAccount creator = insertUser("threshold.creator", "임계값 작성자", "ACTIVE", "STUDENT");
         AuthPrincipal creatorPrincipal = studentPrincipal(creator);

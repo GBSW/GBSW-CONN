@@ -73,6 +73,7 @@ app:
       throttle-fingerprint: ${THROTTLE_FINGERPRINT_SECRET}
   proposal:
     support-threshold: ${PROPOSAL_SUPPORT_THRESHOLD:50}
+    report-hide-threshold: ${PROPOSAL_REPORT_HIDE_THRESHOLD:5}
   moderation:
     identity-reveal-window: ${IDENTITY_REVEAL_WINDOW:24h}
   identity-vault:

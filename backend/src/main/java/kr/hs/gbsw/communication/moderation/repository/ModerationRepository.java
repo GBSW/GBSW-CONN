@@ -367,6 +367,31 @@ public class ModerationRepository {
         }
     }
 
+    public int countReports(UUID proposalId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM content_reports WHERE proposal_id = UUID_TO_BIN(?)",
+                Integer.class, proposalId.toString());
+        return count == null ? 0 : count;
+    }
+
+    /**
+     * 신고가 임계값에 도달한 제안을 일반 사용자에게서 임시로 가린다.
+     *
+     * 이미 심의로 확정 공개 제한된 제안은 건드리지 않는다. 확정 상태를 임시 상태로
+     * 되돌리면 심의 결과가 뒤집힌 것처럼 보이기 때문이다. 조건부 UPDATE로 걸러
+     * 같은 순간에 들어온 요청이 두 번 적용되지 않게 한다.
+     *
+     * @return 이번 호출이 실제로 가림을 적용했으면 true
+     */
+    public boolean restrictProposalByReportThreshold(UUID proposalId, Instant now) {
+        return jdbcTemplate.update("""
+                        UPDATE proposals
+                        SET visibility_status = 'RESTRICTED', updated_at = ?
+                        WHERE id = UUID_TO_BIN(?) AND visibility_status = 'VISIBLE'
+                        """,
+                Timestamp.from(now), proposalId.toString()) == 1;
+    }
+
     public void hideProposalByDecision(UUID proposalId, UUID caseId, Instant now) {
         String fromStatus = jdbcTemplate.queryForObject("""
                         SELECT visibility_status FROM proposals
