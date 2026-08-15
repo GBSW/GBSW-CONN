@@ -286,6 +286,7 @@ public class ModerationRepository {
                                BIN_TO_UUID(moderation_case.proposal_id) AS proposal_id,
                                BIN_TO_UUID(proposal.public_id) AS proposal_public_id,
                                moderation_case.case_type, moderation_case.case_status,
+                               moderation_case.decided_at,
                                BIN_TO_UUID(viewer_snapshot.id) AS reviewer_snapshot_id,
                                viewer_snapshot.office_type
                         FROM moderation_cases moderation_case
@@ -304,8 +305,13 @@ public class ModerationRepository {
                         ModerationCaseType.valueOf(resultSet.getString("case_type")),
                         ModerationCaseStatus.valueOf(resultSet.getString("case_status")),
                         UUID.fromString(resultSet.getString("reviewer_snapshot_id")),
-                        OfficeType.valueOf(resultSet.getString("office_type"))),
+                        OfficeType.valueOf(resultSet.getString("office_type")),
+                        toInstant(resultSet.getTimestamp("decided_at"))),
                 reviewerUserId.toString(), publicId.toString()).stream().findFirst();
+    }
+
+    private static Instant toInstant(Timestamp timestamp) {
+        return timestamp == null ? null : timestamp.toInstant();
     }
 
     public boolean hasVote(UUID reviewerSnapshotId) {

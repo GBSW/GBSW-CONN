@@ -2,7 +2,7 @@
 
 경북소프트웨어마이스터고 학생과 교사가 건의·제안·정보 요청을 투명하게 주고받기 위한 학생자치 기반 시스템이다. 정식 서비스명과 자체 브랜딩은 아직 정해지지 않아 현재는 설명형 이름과 중립 색상만 사용한다. 학교 공식 로고·교표·색상은 사용하지 않는다.
 
-> 현재 상태: 프로젝트 기반, 자체 인증·권한 생명주기, 공개 제안·동의·정식 안건, 담당 교사 공식 답변, 신고와 3인 고정 심의, 학생부장교사 일회 신원 확인까지 구현되었다. 비공개 고충과 재정·행정 공개는 아직 구현하지 않았으며 운영 배포는 수행하지 않았다.
+> 현재 상태: 프로젝트 기반, 자체 인증·권한 생명주기, 공개 제안·동의·정식 안건, 담당 교사 공식 답변, 신고와 3인 고정 심의, 고정 심의자 3인의 기간 내 신원 확인까지 구현되었다. 비공개 고충과 재정·행정 공개는 아직 구현하지 않았으며 운영 배포는 수행하지 않았다.
 
 ## 1. 해결하려는 문제와 제품 원칙
 
@@ -37,7 +37,7 @@
 
 ## 4. 삭제와 신원 확인
 
-신고, 공개 제한, 신원 확인, 실제 신원 열람은 별개의 행위다. 공개 제한은 원문을 지우는 물리 삭제가 아니라 일반 사용자에게 숨기는 소프트 삭제다. 신원 확인은 세 심의자의 전원 승인 뒤에도 배정된 학생부장교사만 최근 재인증과 사유 확인을 거쳐 수행하며, 학생회장·부회장과 슈퍼 어드민은 실제 신원을 볼 수 없다.
+신고, 공개 제한, 신원 확인, 실제 신원 열람은 별개의 행위다. 공개 제한은 원문을 지우는 물리 삭제가 아니라 일반 사용자에게 숨기는 소프트 삭제다. 신원 확인은 세 심의자의 전원 승인 뒤에 사건에 고정된 세 심의자가 승인 시점부터 24시간 동안 각자 최근 재인증과 사유 입력을 거쳐 수행한다. 확인할 때마다 감사 기록이 남는다. 슈퍼 어드민은 실제 신원을 볼 수 없다.
 
 ## 5. 시스템 구조
 
@@ -83,20 +83,11 @@ docker-compose.yml
 
 ## 8. 사전 설치
 
-- JDK 25.0.4 계열 (설치하지 않으면 Gradle이 자동으로 내려받는다. 아래 참고)
+- JDK 25.0.4 계열
 - Node.js 24.18.0과 npm 10.9 이상
 - Docker Desktop 또는 Docker Engine + Compose v2
 
-JDK 25를 찾지 못하면 Gradle이 Eclipse Temurin 25를 자동으로 내려받아 `~/.gradle/jdks` 아래에 둔다. 첫 빌드에만 발생하며 네트워크와 수백 MB의 디스크를 사용한다. 이미 설치된 JDK 25가 있으면 그것을 그대로 쓰고 추가 다운로드는 하지 않는다.
-
-선택된 툴체인은 다음으로 확인한다.
-
-```bash
-cd backend
-./gradlew -q javaToolchains
-```
-
-자동 다운로드를 원하지 않으면 JDK 25를 직접 설치한다. macOS Homebrew OpenJDK가 `/usr/libexec/java_home`에 보이지 않으면 다음처럼 현재 셸에만 경로를 지정한다.
+macOS Homebrew OpenJDK가 `/usr/libexec/java_home`에 보이지 않으면 다음처럼 현재 셸에만 경로를 지정한다.
 
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home
@@ -122,6 +113,7 @@ cp .env.example .env
 | `GENERAL_REQUESTS_PER_MINUTE` | 단일 인스턴스 일반 API 제한 설정 |
 | `ACTIVATION_CODE_TTL`, `PASSWORD_RESET_CODE_TTL`, `REAUTHENTICATION_TTL` | 개인별 일회 코드 만료와 민감 작업 재인증 유효 시간 |
 | `MINIMUM_PASSWORD_LENGTH`, `MAXIMUM_PASSWORD_LENGTH` | 비밀번호 길이 정책 |
+| `IDENTITY_REVEAL_WINDOW` | 신원 확인 사건 승인 후 고정 심의자가 열람할 수 있는 기간 |
 | `THROTTLE_FINGERPRINT_SECRET` | 계정/IP 차단 식별자를 HMAC 처리하는 32자 이상 운영 비밀 |
 | `PROPOSAL_SUPPORT_THRESHOLD` | 정식 안건으로 승격되는 유효 동의 수 |
 | `PROPOSAL_REPORT_HIDE_THRESHOLD` | 제안을 임시로 가리는 유효 신고 수 |
@@ -249,7 +241,7 @@ npx playwright install chromium
 npm run e2e
 ```
 
-E2E는 빈 MySQL에 Flyway 마이그레이션을 적용하고 학생 50명, 교사, 관리자, 고정 심의자를 실제 API로 준비한 뒤 공개 제안, 정식 안건, 공식 답변, 관리자 지정, 3인 심의, 학생부장교사 일회 신원 확인을 검증한다. 종료 시 컨테이너와 프로세스를 정리하며 실패 진단 파일은 `frontend/test-results`와 임시 진단 디렉터리에 남긴다. GitHub Actions도 같은 `npm run e2e`를 실행한다. 인메모리 DB만으로 DB 불변조건을 검증하지 않는다.
+E2E는 빈 MySQL에 Flyway 마이그레이션을 적용하고 학생 50명, 교사, 관리자, 고정 심의자를 실제 API로 준비한 뒤 공개 제안, 정식 안건, 공식 답변, 관리자 지정, 3인 심의, 고정 심의자의 신원 확인을 검증한다. 종료 시 컨테이너와 프로세스를 정리하며 실패 진단 파일은 `frontend/test-results`와 임시 진단 디렉터리에 남긴다. GitHub Actions도 같은 `npm run e2e`를 실행한다. 인메모리 DB만으로 DB 불변조건을 검증하지 않는다.
 
 ## 18. 주요 설정
 
@@ -273,7 +265,7 @@ E2E는 빈 MySQL에 Flyway 마이그레이션을 적용하고 학생 50명, 교�
 
 ## 21. 자주 발생하는 문제
 
-- `Cannot find a Java installation ... 25`: 네트워크가 차단된 환경에서 Gradle이 JDK를 내려받지 못한 경우다. JDK 25를 직접 설치하고 위 macOS `JAVA_HOME` 예시를 적용한다.
+- `Cannot find a Java installation ... 25`: 위 macOS `JAVA_HOME` 예시를 적용한다.
 - `DB_PASSWORD` 누락: `.env.example`을 복사한 뒤 백엔드 실행 셸에서 export한다.
 - MySQL 포트 충돌: `.env`의 `MYSQL_PORT`와 `DB_URL` 포트를 함께 변경한다.
 - OpenAPI 타입 생성 연결 실패: 백엔드와 MySQL health를 먼저 확인한다.
