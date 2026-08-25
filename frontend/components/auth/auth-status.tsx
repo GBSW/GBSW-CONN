@@ -6,11 +6,13 @@ import { Button } from "@astryxdesign/core/Button";
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { HStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 type CurrentUser = components["schemas"]["CurrentUserResponse"];
 
 export function AuthStatus() {
+  const router = useRouter();
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [loaded, setLoaded] = useState(false);
 
@@ -34,7 +36,7 @@ export function AuthStatus() {
       await apiPost<void>("/api/v1/auth/logout");
     } finally {
       setUser(null);
-      window.location.assign("/");
+      router.replace("/");
     }
   }
 
@@ -47,7 +49,7 @@ export function AuthStatus() {
       "STUDENT_COUNCIL_PRESIDENT",
       "STUDENT_COUNCIL_VICE_PRESIDENT",
     ].includes(office));
-    const navigate = (href: string) => () => window.location.assign(href);
+    const navigate = (href: string) => () => router.push(href);
     const items = [
       { label: user.displayName, isDisabled: true },
       { label: "대시보드", onClick: navigate("/dashboard") },
